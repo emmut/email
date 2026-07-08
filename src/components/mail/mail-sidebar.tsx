@@ -14,6 +14,11 @@ import {
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -45,6 +50,7 @@ import { folders } from "@/components/mail/data";
 import { signOut } from "@/lib/auth";
 import { cn, isMac } from "@/lib/utils";
 import {
+  avatarQuery,
   createTag,
   folderCountsQuery,
   profileQuery,
@@ -84,6 +90,7 @@ export function MailSidebar({
   const { data: profile } = useQuery(profileQuery);
   const { data: counts } = useQuery(folderCountsQuery);
   const { data: tags } = useQuery(tagsQuery);
+  const { data: avatar } = useQuery(avatarQuery);
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
 
@@ -116,9 +123,12 @@ export function MailSidebar({
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <SidebarMenuButton size="lg" tooltip="Account">
-                  <div className="bg-primary text-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                    {email ? initialsFromEmail(email) : "…"}
-                  </div>
+                  <Avatar className="size-8 rounded-lg">
+                    {avatar && <AvatarImage src={avatar} alt="" />}
+                    <AvatarFallback className="bg-primary text-primary-foreground rounded-lg">
+                      {email ? initialsFromEmail(email) : "…"}
+                    </AvatarFallback>
+                  </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-medium">
                       {email ? email.split("@")[0] : "Loading…"}

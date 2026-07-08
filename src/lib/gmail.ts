@@ -178,6 +178,21 @@ export const profileQuery = queryOptions({
   staleTime: Infinity,
 });
 
+// Signed-in account's profile photo URL (null if none or not permitted).
+export const avatarQuery = queryOptions({
+  queryKey: ["gmail", "avatar"],
+  queryFn: async (): Promise<string | null> => {
+    const res = await google<{
+      photos?: { url?: string; metadata?: { primary?: boolean } }[];
+    }>(`${PEOPLE_BASE}/people/me?personFields=photos`);
+    const photo =
+      res.photos?.find((p) => p.metadata?.primary) ?? res.photos?.[0];
+    return photo?.url ?? null;
+  },
+  staleTime: Infinity,
+  retry: false, // 403 when the granted scopes don't cover profile photos
+});
+
 // Label id → display name, fetched once per session (user labels rarely change;
 // the map is only used for badge text).
 let labelNamesPromise: Promise<Map<string, string>> | null = null;
