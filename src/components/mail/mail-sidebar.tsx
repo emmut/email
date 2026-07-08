@@ -9,7 +9,7 @@ import {
   Trash2,
   type LucideIcon,
 } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   DropdownMenu,
@@ -29,6 +29,8 @@ import {
 } from "@/components/ui/sidebar";
 import { folders } from "@/components/mail/data";
 import { signOut } from "@/lib/auth";
+import { cn, isMac } from "@/lib/utils";
+import { folderCountsQuery, profileQuery } from "@/lib/gmail";
 
 const ICONS: Record<string, LucideIcon> = {
   inbox: Inbox,
@@ -39,6 +41,18 @@ const ICONS: Record<string, LucideIcon> = {
   archive: Archive,
 };
 
+// "emil.jansson@x" → "EJ"
+function initialsFromEmail(email: string) {
+  return email
+    .split("@")[0]
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
 export function MailSidebar({
   activeFolder,
   onSelectFolder,
@@ -47,26 +61,37 @@ export function MailSidebar({
   onSelectFolder: (id: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const { data: profile } = useQuery(profileQuery);
+  const { data: counts } = useQuery(folderCountsQuery);
+
   const signOutMutation = useMutation({
     mutationFn: signOut,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["auth"] }),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: ["gmail"] });
+      queryClient.invalidateQueries({ queryKey: ["auth"] });
+    },
   });
+
+  const email = profile?.emailAddress;
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader>
+      {/* Clear the macOS traffic lights (transparent title bar overlay) */}
+      <SidebarHeader data-tauri-drag-region className={cn(isMac && "pt-8")}>
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <SidebarMenuButton size="lg" tooltip="Account">
                   <div className="bg-primary text-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                    EJ
+                    {email ? initialsFromEmail(email) : "…"}
                   </div>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-medium">Emil Jansson</span>
+                    <span className="truncate font-medium">
+                      {email ? email.split("@")[0] : "Loading…"}
+                    </span>
                     <span className="text-muted-foreground truncate text-xs">
-                      emil.jansson@compileit.com
+                      {email ?? ""}
                     </span>
                   </div>
                   <ChevronsUpDown className="ml-auto size-4" />
@@ -90,6 +115,7 @@ export function MailSidebar({
           <SidebarMenu>
             {folders.map((folder) => {
               const Icon = ICONS[folder.icon] ?? Inbox;
+              const count = counts?.[folder.id];
               return (
                 <SidebarMenuItem key={folder.id}>
                   <SidebarMenuButton
@@ -100,9 +126,7 @@ export function MailSidebar({
                     <Icon />
                     <span>{folder.label}</span>
                   </SidebarMenuButton>
-                  {folder.count ? (
-                    <SidebarMenuBadge>{folder.count}</SidebarMenuBadge>
-                  ) : null}
+                  {count ? <SidebarMenuBadge>{count}</SidebarMenuBadge> : null}
                 </SidebarMenuItem>
               );
             })}

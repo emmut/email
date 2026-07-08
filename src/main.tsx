@@ -6,6 +6,13 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { routeTree } from "./routeTree.gen";
 import "./index.css";
 
+// Follow the OS appearance: shadcn theming is class-based (.dark on <html>).
+const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+const applyColorScheme = () =>
+  document.documentElement.classList.toggle("dark", colorScheme.matches);
+applyColorScheme();
+colorScheme.addEventListener("change", applyColorScheme);
+
 const queryClient = new QueryClient();
 
 const router = createRouter({

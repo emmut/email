@@ -17,7 +17,7 @@ use tauri_plugin_opener::OpenerExt;
 const AUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 const REVOKE_ENDPOINT: &str = "https://oauth2.googleapis.com/revoke";
-const SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify";
+const SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly";
 const KEYCHAIN_SERVICE: &str = "com.emiljansson.email";
 const KEYCHAIN_USER: &str = "gmail-refresh-token";
 const REDIRECT_TIMEOUT: Duration = Duration::from_secs(300);
