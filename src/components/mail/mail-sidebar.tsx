@@ -19,7 +19,23 @@ import {
   AvatarFallback,
   AvatarImage,
 } from "@/components/ui/avatar";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
   Dialog,
   DialogContent,
@@ -52,10 +68,12 @@ import { cn, isMac } from "@/lib/utils";
 import {
   avatarQuery,
   createTag,
+  deleteTag,
   folderCountsQuery,
   profileQuery,
   tagFolderId,
   tagsQuery,
+  type Tag,
 } from "@/lib/gmail";
 
 const ICONS: Record<string, LucideIcon> = {
@@ -93,6 +111,7 @@ export function MailSidebar({
   const { data: avatar } = useQuery(avatarQuery);
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Tag | null>(null);
 
   const createTagMutation = useMutation({
     mutationFn: createTag,
@@ -101,6 +120,16 @@ export function MailSidebar({
       setNewTagOpen(false);
       setNewTagName("");
       onSelectFolder(tagFolderId(tag.id));
+    },
+  });
+
+  const deleteTagMutation = useMutation({
+    mutationFn: (tag: Tag) => deleteTag(tag.id),
+    onSuccess: (_data, tag) => {
+      queryClient.invalidateQueries({ queryKey: ["gmail", "tags"] });
+      // Gmail stripped the label from every message; refetch badges.
+      queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
+      if (activeFolder === tagFolderId(tag.id)) onSelectFolder("inbox");
     },
   });
 
@@ -188,20 +217,54 @@ export function MailSidebar({
               const folderId = tagFolderId(tag.id);
               return (
                 <SidebarMenuItem key={tag.id}>
-                  <SidebarMenuButton
-                    tooltip={tag.name}
-                    isActive={folderId === activeFolder}
-                    onClick={() => onSelectFolder(folderId)}
-                  >
-                    <TagIcon />
-                    <span>{tag.name}</span>
-                  </SidebarMenuButton>
+                  <ContextMenu>
+                    <ContextMenuTrigger asChild>
+                      <SidebarMenuButton
+                        tooltip={tag.name}
+                        isActive={folderId === activeFolder}
+                        onClick={() => onSelectFolder(folderId)}
+                      >
+                        <TagIcon />
+                        <span>{tag.name}</span>
+                      </SidebarMenuButton>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      <ContextMenuItem
+                        variant="destructive"
+                        onSelect={() => setDeleteTarget(tag)}
+                      >
+                        <Trash2 />
+                        Delete tag
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
                 </SidebarMenuItem>
               );
             })}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete tag “{deleteTarget?.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The tag is removed from every mail. Mails themselves are kept.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteTarget && deleteTagMutation.mutate(deleteTarget)}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <Dialog open={newTagOpen} onOpenChange={setNewTagOpen}>
         <DialogContent className="sm:max-w-sm">
           <form

@@ -20,7 +20,9 @@ async function google<T>(url: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     throw new Error(`Google API ${res.status}: ${await res.text()}`);
   }
-  return res.json() as Promise<T>;
+  // Some endpoints (e.g. labels.delete) return an empty body.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 function gmail<T>(path: string, init?: RequestInit): Promise<T> {
@@ -237,6 +239,13 @@ export async function createTag(name: string): Promise<Tag> {
   // Keep the id → name map current so new tags render by name immediately.
   (await labelNames()).set(label.id, label.name);
   return { id: label.id, name: label.name };
+}
+
+// Deletes the label everywhere; Gmail removes it from all messages.
+export function deleteTag(tagId: string) {
+  return gmail<void>(`/labels/${encodeURIComponent(tagId)}`, {
+    method: "DELETE",
+  });
 }
 
 export function setMessageTag(id: string, tagId: string, on: boolean) {
