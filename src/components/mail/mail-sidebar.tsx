@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Archive,
   ArchiveX,
@@ -5,22 +6,35 @@ import {
   File,
   Inbox,
   LogOut,
+  Plus,
   Send,
+  Tag as TagIcon,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
+  SidebarGroupAction,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuBadge,
@@ -30,7 +44,13 @@ import {
 import { folders } from "@/components/mail/data";
 import { signOut } from "@/lib/auth";
 import { cn, isMac } from "@/lib/utils";
-import { folderCountsQuery, profileQuery } from "@/lib/gmail";
+import {
+  createTag,
+  folderCountsQuery,
+  profileQuery,
+  tagFolderId,
+  tagsQuery,
+} from "@/lib/gmail";
 
 const ICONS: Record<string, LucideIcon> = {
   inbox: Inbox,
@@ -63,6 +83,19 @@ export function MailSidebar({
   const queryClient = useQueryClient();
   const { data: profile } = useQuery(profileQuery);
   const { data: counts } = useQuery(folderCountsQuery);
+  const { data: tags } = useQuery(tagsQuery);
+  const [newTagOpen, setNewTagOpen] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+
+  const createTagMutation = useMutation({
+    mutationFn: createTag,
+    onSuccess: (tag) => {
+      queryClient.invalidateQueries({ queryKey: ["gmail", "tags"] });
+      setNewTagOpen(false);
+      setNewTagName("");
+      onSelectFolder(tagFolderId(tag.id));
+    },
+  });
 
   const signOutMutation = useMutation({
     mutationFn: signOut,
@@ -132,7 +165,68 @@ export function MailSidebar({
             })}
           </SidebarMenu>
         </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Tags</SidebarGroupLabel>
+          <SidebarGroupAction
+            title="New tag"
+            onClick={() => setNewTagOpen(true)}
+          >
+            <Plus />
+          </SidebarGroupAction>
+          <SidebarMenu>
+            {(tags ?? []).map((tag) => {
+              const folderId = tagFolderId(tag.id);
+              return (
+                <SidebarMenuItem key={tag.id}>
+                  <SidebarMenuButton
+                    tooltip={tag.name}
+                    isActive={folderId === activeFolder}
+                    onClick={() => onSelectFolder(folderId)}
+                  >
+                    <TagIcon />
+                    <span>{tag.name}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+        </SidebarGroup>
       </SidebarContent>
+      <Dialog open={newTagOpen} onOpenChange={setNewTagOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = newTagName.trim();
+              if (name) createTagMutation.mutate(name);
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>New tag</DialogTitle>
+            </DialogHeader>
+            <Input
+              autoFocus
+              placeholder="Tag name"
+              value={newTagName}
+              onChange={(e) => setNewTagName(e.target.value)}
+            />
+            {createTagMutation.isError && (
+              <p className="text-destructive text-xs">
+                Could not create tag: {createTagMutation.error.message}
+              </p>
+            )}
+            <DialogFooter>
+              <Button
+                type="submit"
+                disabled={!newTagName.trim() || createTagMutation.isPending}
+              >
+                {createTagMutation.isPending ? "Creating…" : "Create"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </Sidebar>
   );
 }

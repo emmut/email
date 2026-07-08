@@ -5,7 +5,10 @@ import {
   archiveMessage,
   markRead,
   markUnread,
+  setMessageTag,
+  tagFolderId,
   trashMessage,
+  type Tag,
 } from "@/lib/gmail";
 
 export type MailAction = "archive" | "trash" | "read" | "unread";
@@ -118,5 +121,70 @@ export function useMailActions(onRemoved?: (id: string) => void) {
   return {
     act: (action: MailAction, id: string) => mutation.mutate({ action, id }),
     isPending: mutation.isPending,
+  };
+}
+
+function addTagToMail(mail: Mail, tag: Tag): Mail {
+  return {
+    ...mail,
+    labelIds: [...new Set([...mail.labelIds, tag.id])],
+    labels: [...new Set([...mail.labels, tag.name.toLowerCase()])],
+  };
+}
+
+function removeTagFromMail(mail: Mail, tag: Tag): Mail {
+  return {
+    ...mail,
+    labelIds: mail.labelIds.filter((id) => id !== tag.id),
+    labels: mail.labels.filter((l) => l !== tag.name.toLowerCase()),
+  };
+}
+
+// Optimistic tag toggle: list caches update synchronously (badge appears or
+// disappears, mail drops out of an open tag folder), roll back on failure,
+// and reconcile with the server on success.
+export function useTagActions() {
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: ({ id, tag, on }: { id: string; tag: Tag; on: boolean }) =>
+      setMessageTag(id, tag.id, on),
+    onMutate: async ({ id, tag, on }) => {
+      await queryClient.cancelQueries({ queryKey: ["gmail", "list"] });
+      const previous = queryClient.getQueriesData<Mail[]>({
+        queryKey: ["gmail", "list"],
+      });
+      const apply = on ? addTagToMail : removeTagFromMail;
+      for (const [key, mails] of previous) {
+        if (!mails) continue;
+        // Untagging while that tag's folder is open removes the mail from it.
+        if (!on && key[2] === tagFolderId(tag.id)) {
+          queryClient.setQueryData(
+            key,
+            mails.filter((m) => m.id !== id),
+          );
+          continue;
+        }
+        queryClient.setQueryData(
+          key,
+          mails.map((m) => (m.id === id ? apply(m, tag) : m)),
+        );
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      context?.previous?.forEach(([key, data]) =>
+        queryClient.setQueryData(key, data),
+      );
+    },
+    onSuccess: () => {
+      // Reconcile tag folder lists (newly tagged mail appears there).
+      queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
+    },
+  });
+
+  return {
+    toggle: (id: string, tag: Tag, on: boolean) =>
+      mutation.mutate({ id, tag, on }),
   };
 }

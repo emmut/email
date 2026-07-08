@@ -162,6 +162,7 @@ function toMail(msg: Message, labelNames: Map<string, string>): Mail {
     text: msg.snippet ?? "",
     date: new Date(Number(msg.internalDate ?? 0)).toISOString(),
     read: !msg.labelIds?.includes("UNREAD"),
+    labelIds: msg.labelIds ?? [],
     labels: (msg.labelIds ?? [])
       .filter((id) => !SYSTEM_LABELS.has(id) && !id.startsWith("CATEGORY_"))
       .map((id) => labelNames.get(id) ?? id)
@@ -190,6 +191,56 @@ function labelNames(): Promise<Map<string, string>> {
   return labelNamesPromise;
 }
 
+// --- tags (Gmail user labels) ---
+
+export interface Tag {
+  id: string;
+  name: string;
+}
+
+export const tagsQuery = queryOptions({
+  queryKey: ["gmail", "tags"],
+  queryFn: async (): Promise<Tag[]> => {
+    const res = await gmail<{ labels: Label[] }>("/labels");
+    return res.labels
+      .filter((l) => l.type === "user")
+      .map((l) => ({ id: l.id, name: l.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  },
+  staleTime: 5 * 60_000,
+});
+
+export async function createTag(name: string): Promise<Tag> {
+  const label = await gmail<Label>("/labels", {
+    method: "POST",
+    body: JSON.stringify({
+      name,
+      labelListVisibility: "labelShow",
+      messageListVisibility: "show",
+    }),
+  });
+  // Keep the id → name map current so new tags render by name immediately.
+  (await labelNames()).set(label.id, label.name);
+  return { id: label.id, name: label.name };
+}
+
+export function setMessageTag(id: string, tagId: string, on: boolean) {
+  return modifyMessage(
+    id,
+    on ? { addLabelIds: [tagId] } : { removeLabelIds: [tagId] },
+  );
+}
+
+// Tags surface in the sidebar as synthetic folder ids ("tag:<labelId>").
+// These two are the only places that know the encoding.
+export function tagFolderId(tagId: string): string {
+  return `tag:${tagId}`;
+}
+
+export function tagIdFromFolder(folder: string): string | null {
+  return folder.startsWith("tag:") ? folder.slice(4) : null;
+}
+
 // Folder id (sidebar) → messages.list params. Archive = everything that has
 // been removed from the inbox but not sent/drafted/junked/trashed.
 const FOLDER_PARAMS: Record<string, string> = {
@@ -205,7 +256,10 @@ export function mailListQuery(folder: string, search: string) {
   return queryOptions({
     queryKey: ["gmail", "list", folder, search],
     queryFn: async (): Promise<Mail[]> => {
-      let params = FOLDER_PARAMS[folder] ?? FOLDER_PARAMS.inbox;
+      const tagId = tagIdFromFolder(folder);
+      let params = tagId
+        ? `labelIds=${encodeURIComponent(tagId)}`
+        : (FOLDER_PARAMS[folder] ?? FOLDER_PARAMS.inbox);
       if (search) {
         const q = params.startsWith("q=")
           ? `${decodeURIComponent(params.slice(2))} ${search}`
@@ -398,6 +452,7 @@ export interface OutgoingMail {
   threadId?: string;
   inReplyTo?: string; // original Message-ID
   references?: string; // original References + Message-ID
+  labelIds?: string[]; // user labels applied to the sent message
 }
 
 function base64Content(content: string): string {
@@ -413,7 +468,7 @@ function mimePart(type: string, content: string): string {
 }
 
 // Build an RFC 822 message and send it. Gmail fills in From/Date/Message-ID.
-export function sendMessage(msg: OutgoingMail) {
+export async function sendMessage(msg: OutgoingMail) {
   const headers = [
     `To: ${msg.to}`,
     ...(msg.cc ? [`Cc: ${msg.cc}`] : []),
@@ -441,10 +496,14 @@ export function sendMessage(msg: OutgoingMail) {
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
-  return gmail<Message>("/messages/send", {
+  const sent = await gmail<Message>("/messages/send", {
     method: "POST",
     body: JSON.stringify({ raw, ...(msg.threadId ? { threadId: msg.threadId } : {}) }),
   });
+  if (msg.labelIds?.length) {
+    await modifyMessage(sent.id, { addLabelIds: msg.labelIds });
+  }
+  return sent;
 }
 
 // --- historyId delta sync ---

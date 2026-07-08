@@ -28,7 +28,13 @@ import { MailDisplay } from "@/components/mail/mail-display";
 import type { Mail as MailItem } from "@/components/mail/data";
 import { ShortcutsHelp } from "@/components/mail/shortcuts-help";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
-import { mailListQuery, markRead, useGmailSync } from "@/lib/gmail";
+import {
+  mailListQuery,
+  markRead,
+  tagIdFromFolder,
+  tagsQuery,
+  useGmailSync,
+} from "@/lib/gmail";
 
 export function Mail() {
   const [activeFolder, setActiveFolder] = useState("inbox");
@@ -76,6 +82,12 @@ export function Mail() {
   const items = (mails ?? []).filter((m) => tab === "all" || !m.read);
   const selected = mails?.find((m) => m.id === selectedId) ?? null;
 
+  const { data: tags } = useQuery(tagsQuery);
+  const activeTagId = tagIdFromFolder(activeFolder);
+  const title = activeTagId
+    ? (tags?.find((t) => t.id === activeTagId)?.name ?? "Tag")
+    : activeFolder;
+
   const moveSelection = (delta: number) => {
     if (!items.length) return;
     const index = items.findIndex((m) => m.id === selectedId);
@@ -111,7 +123,7 @@ export function Mail() {
             className="flex items-center gap-2 px-4 py-2"
           >
             <SidebarTrigger />
-            <h1 className="text-xl font-bold capitalize">{activeFolder}</h1>
+            <h1 className="text-xl font-bold capitalize">{title}</h1>
             <Button
               variant="outline"
               size="sm"

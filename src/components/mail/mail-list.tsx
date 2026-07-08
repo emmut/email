@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Archive, MailOpen, MailX, Trash2 } from "lucide-react";
+import { Archive, MailOpen, MailX, Tag as TagIcon, Trash2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 import {
   AlertDialog,
@@ -14,15 +15,20 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   ContextMenu,
+  ContextMenuCheckboxItem,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { Mail } from "@/components/mail/data";
-import { useMailActions } from "@/hooks/use-mail-actions";
+import { tagsQuery } from "@/lib/gmail";
+import { useMailActions, useTagActions } from "@/hooks/use-mail-actions";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
@@ -50,6 +56,8 @@ export function MailList({
 }) {
   const [trashTarget, setTrashTarget] = useState<Mail | null>(null);
   const { act } = useMailActions();
+  const { toggle: toggleTag } = useTagActions();
+  const { data: tags } = useQuery(tagsQuery);
 
   return (
     <ScrollArea className="h-full">
@@ -113,6 +121,30 @@ export function MailList({
                 <Trash2 />
                 Move to trash
               </ContextMenuItem>
+              {tags?.length ? (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger>
+                      <TagIcon />
+                      Tags
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent>
+                      {tags.map((tag) => (
+                        <ContextMenuCheckboxItem
+                          key={tag.id}
+                          checked={mail.labelIds.includes(tag.id)}
+                          onCheckedChange={(on) =>
+                            toggleTag(mail.id, tag, on === true)
+                          }
+                        >
+                          {tag.name}
+                        </ContextMenuCheckboxItem>
+                      ))}
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                </>
+              ) : null}
               <ContextMenuSeparator />
               {mail.read ? (
                 <ContextMenuItem onSelect={() => act("unread", mail.id)}>

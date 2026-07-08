@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,6 +18,7 @@ import {
   contactsQuery,
   sendMessage,
   signatureQuery,
+  tagsQuery,
   type OutgoingMail,
 } from "@/lib/gmail";
 
@@ -116,6 +118,14 @@ function ComposeFields({
   const [cc, setCc] = useState(draft.cc ?? "");
   const [bcc, setBcc] = useState("");
   const [subject, setSubject] = useState(draft.subject ?? "");
+  const [tagIds, setTagIds] = useState<string[]>([]);
+
+  const { data: tags } = useQuery(tagsQuery);
+
+  const toggleTag = (id: string) =>
+    setTagIds((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id],
+    );
 
   const initialHtml =
     "<p></p>" +
@@ -159,6 +169,7 @@ function ComposeFields({
           threadId: draft.threadId,
           inReplyTo: draft.inReplyTo,
           references: draft.references,
+          labelIds: tagIds.length ? tagIds : undefined,
         });
       }}
     >
@@ -198,6 +209,22 @@ function ComposeFields({
         autoFocus={isReply}
         onChange={(html, text) => setBody({ html, text })}
       />
+      {tags?.length ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-muted-foreground text-xs">Tags:</span>
+          {tags.map((tag) => (
+            <Badge
+              key={tag.id}
+              asChild
+              variant={tagIds.includes(tag.id) ? "default" : "outline"}
+            >
+              <button type="button" onClick={() => toggleTag(tag.id)}>
+                {tag.name}
+              </button>
+            </Badge>
+          ))}
+        </div>
+      ) : null}
       <DialogFooter className="items-center gap-3">
         {sendMutation.isError && (
           <span className="text-destructive mr-auto text-xs">

@@ -8,7 +8,8 @@ export interface Mail {
   text: string; // snippet in list context
   date: string; // ISO
   read: boolean;
-  labels: string[];
+  labelIds: string[]; // raw Gmail label ids (tag membership checks)
+  labels: string[]; // user label display names (badges)
 }
 
 export interface MailFolder {
