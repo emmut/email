@@ -4,13 +4,13 @@
 //! module except into the OS keychain. The webview only ever sees short-lived
 //! access tokens via the `get_access_token` command.
 
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use rand::RngCore;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use tauri::async_runtime::Mutex;
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
@@ -23,7 +23,18 @@ const KEYCHAIN_USER: &str = "gmail-refresh-token";
 const REDIRECT_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Default)]
-pub struct AuthState(Mutex<Option<CachedToken>>);
+pub struct AuthState(Mutex<Inner>);
+
+/// All auth state lives behind one async lock so concurrent `get_access_token`
+/// calls queue up instead of each hitting the keychain or the token endpoint.
+#[derive(Default)]
+struct Inner {
+    access: Option<CachedToken>,
+    refresh: Option<String>,
+    /// The keychain is read at most once per app run; afterwards `refresh`
+    /// (including `None` when signed out) is authoritative.
+    keychain_loaded: bool,
+}
 
 struct CachedToken {
     access_token: String,
@@ -79,6 +90,40 @@ fn delete_refresh_token() -> Result<(), String> {
     }
 }
 
+/// Recreates the keychain item so the current binary becomes its ACL owner.
+/// macOS ties keychain access to the exact code signature; with ad-hoc signed
+/// builds every rebuild looks like a new app to the item created by the old
+/// one, so without this each launch after an update would prompt again.
+fn reown_refresh_token(token: &str) {
+    if delete_refresh_token().is_ok() {
+        if let Err(e) = store_refresh_token(token) {
+            eprintln!("failed to rewrite refresh token to keychain: {e}");
+        }
+    }
+}
+
+/// Returns the refresh token, reading the keychain only on the first call per
+/// app run. Callers must hold the state lock, which also means at most one
+/// keychain prompt regardless of how many requests race at startup.
+async fn refresh_token(inner: &mut Inner) -> Result<Option<String>, String> {
+    if !inner.keychain_loaded {
+        // The read can block for as long as the user stares at the keychain
+        // prompt — keep it off the async workers.
+        let token = tauri::async_runtime::spawn_blocking(load_refresh_token)
+            .await
+            .map_err(|e| e.to_string())??;
+        if let Some(token) = token.clone() {
+            // Awaited under the lock so a concurrent rotation can't interleave
+            // with the delete + recreate. No prompt: deleting never reveals the
+            // secret and the new item is created owned by us.
+            let _ = tauri::async_runtime::spawn_blocking(move || reown_refresh_token(&token)).await;
+        }
+        inner.refresh = token;
+        inner.keychain_loaded = true;
+    }
+    Ok(inner.refresh.clone())
+}
+
 fn base64url(bytes: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
@@ -89,8 +134,8 @@ fn random_token() -> String {
     base64url(&buf)
 }
 
-fn cache_token(state: &AuthState, tokens: &TokenResponse) {
-    *state.0.lock().unwrap() = Some(CachedToken {
+fn cache_token(inner: &mut Inner, tokens: &TokenResponse) {
+    inner.access = Some(CachedToken {
         access_token: tokens.access_token.clone(),
         expires_at: Instant::now() + Duration::from_secs(tokens.expires_in.saturating_sub(60)),
     });
@@ -170,8 +215,9 @@ fn wait_for_redirect(server: tiny_http::Server, expected_state: &str) -> Result<
 }
 
 #[tauri::command]
-pub fn auth_status() -> Result<bool, String> {
-    Ok(load_refresh_token()?.is_some())
+pub async fn auth_status(state: State<'_, AuthState>) -> Result<bool, String> {
+    let mut inner = state.0.lock().await;
+    Ok(refresh_token(&mut inner).await?.is_some())
 }
 
 #[tauri::command]
@@ -233,19 +279,25 @@ pub async fn sign_in(app: AppHandle, state: State<'_, AuthState>) -> Result<(), 
         .as_deref()
         .ok_or("Google did not return a refresh token")?;
     store_refresh_token(refresh)?;
-    cache_token(&state, &tokens);
+    let mut inner = state.0.lock().await;
+    inner.refresh = Some(refresh.to_string());
+    inner.keychain_loaded = true;
+    cache_token(&mut inner, &tokens);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn get_access_token(state: State<'_, AuthState>) -> Result<String, String> {
-    if let Some(cached) = state.0.lock().unwrap().as_ref() {
+    // Held across the refresh exchange on purpose: racing callers wait here
+    // and are then served the freshly cached token instead of each refreshing.
+    let mut inner = state.0.lock().await;
+    if let Some(cached) = inner.access.as_ref() {
         if cached.expires_at > Instant::now() {
             return Ok(cached.access_token.clone());
         }
     }
 
-    let refresh = load_refresh_token()?.ok_or("not signed in")?;
+    let refresh = refresh_token(&mut inner).await?.ok_or("not signed in")?;
     let client_id = client_id()?;
     let secret = client_secret();
     let mut params = vec![
@@ -262,21 +314,24 @@ pub async fn get_access_token(state: State<'_, AuthState>) -> Result<String, Str
         // Refresh token revoked or expired — force a fresh sign-in.
         Err(e) if e.contains("invalid_grant") => {
             delete_refresh_token()?;
-            state.0.lock().unwrap().take();
+            inner.access = None;
+            inner.refresh = None;
             return Err("session expired — sign in again".to_string());
         }
         Err(e) => return Err(e),
     };
     if let Some(new_refresh) = tokens.refresh_token.as_deref() {
         store_refresh_token(new_refresh)?;
+        inner.refresh = Some(new_refresh.to_string());
     }
-    cache_token(&state, &tokens);
+    cache_token(&mut inner, &tokens);
     Ok(tokens.access_token)
 }
 
 #[tauri::command]
 pub async fn sign_out(state: State<'_, AuthState>) -> Result<(), String> {
-    if let Some(refresh) = load_refresh_token()? {
+    let mut inner = state.0.lock().await;
+    if let Some(refresh) = refresh_token(&mut inner).await? {
         // Best-effort revocation; sign-out must still succeed offline.
         let _ = reqwest::Client::new()
             .post(REVOKE_ENDPOINT)
@@ -285,6 +340,7 @@ pub async fn sign_out(state: State<'_, AuthState>) -> Result<(), String> {
             .await;
     }
     delete_refresh_token()?;
-    state.0.lock().unwrap().take();
+    inner.access = None;
+    inner.refresh = None;
     Ok(())
 }
