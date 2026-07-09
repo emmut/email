@@ -15,11 +15,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # dmg only: upload-artifact zips a bare .app and strips exec bits/symlinks, breaking it
           - platform: macos-latest
-            bundles: |
-              src-tauri/target/release/bundle/dmg/*.dmg
-              src-tauri/target/release/bundle/macos/*.app
-            # .app is a directory — fine as CI artifact, but release assets must be plain files
+            bundles: src-tauri/target/release/bundle/dmg/*.dmg
             release_files: src-tauri/target/release/bundle/dmg/*.dmg
           - platform: ubuntu-22.04
             bundles: |
@@ -77,3 +75,9 @@ jobs:
           files: ${{ matrix.release_files }}
           draft: true
           fail_on_unmatched_files: true
+          body: |
+            ## macOS install
+            The app is not notarized. After copying it to Applications, clear the quarantine flag:
+            ```
+            xattr -cr /Applications/Email.app
+            ```

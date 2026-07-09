@@ -46,6 +46,18 @@ Notes:
   (`com.emiljansson.email` / `gmail-refresh-token`); the webview only ever sees
   short-lived access tokens via the `get_access_token` command.
 
+## Install from CI / releases
+
+CI builds (GitHub Actions artifacts and release dmgs) are not notarized — macOS
+marks the downloaded app as "damaged". After copying it to Applications, clear
+the quarantine flag:
+
+```bash
+xattr -cr /Applications/Email.app
+```
+
+Locally built apps don't need this (no quarantine attribute is set).
+
 ## Develop
 
 ```bash
