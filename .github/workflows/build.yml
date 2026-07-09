@@ -51,6 +51,9 @@ jobs:
 
       - name: Build Tauri app
         run: pnpm tauri build
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
 
       - uses: actions/upload-artifact@v4
         with:
