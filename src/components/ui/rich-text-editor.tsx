@@ -5,9 +5,13 @@ import {
   type Editor,
 } from "@tiptap/react"
 import Image from "@tiptap/extension-image"
+import { Markdown } from "@tiptap/markdown"
 import StarterKit from "@tiptap/starter-kit"
 import {
   Bold,
+  Heading1,
+  Heading2,
+  Heading3,
   Italic,
   List,
   ListOrdered,
@@ -56,6 +60,9 @@ function Toolbar({ editor }: { editor: Editor }) {
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
+      heading1: e.isActive("heading", { level: 1 }),
+      heading2: e.isActive("heading", { level: 2 }),
+      heading3: e.isActive("heading", { level: 3 }),
       bold: e.isActive("bold"),
       italic: e.isActive("italic"),
       strike: e.isActive("strike"),
@@ -71,6 +78,25 @@ function Toolbar({ editor }: { editor: Editor }) {
 
   return (
     <div className="flex items-center gap-0.5 border-b border-input p-1">
+      <ToolbarButton
+        icon={Heading1}
+        label="Heading 1"
+        active={state.heading1}
+        onClick={() => chain().toggleHeading({ level: 1 }).run()}
+      />
+      <ToolbarButton
+        icon={Heading2}
+        label="Heading 2"
+        active={state.heading2}
+        onClick={() => chain().toggleHeading({ level: 2 }).run()}
+      />
+      <ToolbarButton
+        icon={Heading3}
+        label="Heading 3"
+        active={state.heading3}
+        onClick={() => chain().toggleHeading({ level: 3 }).run()}
+      />
+      <Separator orientation="vertical" className="mx-1 h-5" />
       <ToolbarButton
         icon={Bold}
         label="Bold"
@@ -132,22 +158,29 @@ export function RichTextEditor({
   autoFocus,
 }: {
   initialHtml?: string
-  onChange: (html: string, text: string) => void
+  onChange: (html: string, text: string, markdown: string) => void
   className?: string
   autoFocus?: boolean
 }) {
   const editor = useEditor({
     // inline so signature/quote images stay in their surrounding text flow
-    extensions: [StarterKit, Image.configure({ inline: true })],
+    extensions: [
+      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+      Image.configure({ inline: true }),
+      Markdown,
+    ],
     content: initialHtml ?? "",
+    contentType: "html",
     autofocus: autoFocus ? "start" : false,
-    onUpdate: ({ editor: e }) => onChange(e.getHTML(), e.getText()),
+    onUpdate: ({ editor: e }) =>
+      onChange(e.getHTML(), e.getText(), e.getMarkdown()),
     editorProps: {
       attributes: {
         class: cn(
           "min-h-44 max-h-80 overflow-y-auto px-2.5 py-1.5 text-sm outline-none",
           // content styling (no typography plugin)
           "[&_p]:my-0.5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5",
+          "[&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-base [&_h3]:font-semibold",
           "[&_blockquote]:my-1 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground",
           "[&_a]:text-primary [&_a]:underline",
           "[&_img]:inline-block [&_img]:max-w-full",
