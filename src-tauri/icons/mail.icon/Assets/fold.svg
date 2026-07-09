@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- envelope fold layer: filled outline of a 56-wide round-capped V stroke.
+       Must stay a filled path (no stroke) — the Liquid Glass engine derives the
+       layer shape from the fill region, so a stroked open path reads as the
+       triangle between the arms and puts a specular line across the V tips. -->
+  <path d="M 512 564.7 L 213.03 335.77 A 28 28 0 0 0 178.97 380.23 L 494.97 622.23 A 28 28 0 0 0 529.03 622.23 L 845.03 380.23 A 28 28 0 0 0 810.97 335.77 Z" fill="#000000"/>
+</svg>
