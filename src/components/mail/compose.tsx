@@ -149,7 +149,7 @@ function ComposeFields({
 
   return (
     <form
-      className="flex flex-col gap-3"
+      className="flex min-w-0 flex-col gap-3"
       onKeyDown={(e) => {
         // Cmd+Enter (macOS) / Ctrl+Enter (Windows, Linux) sends
         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {

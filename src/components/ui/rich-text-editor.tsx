@@ -177,13 +177,14 @@ export function RichTextEditor({
     editorProps: {
       attributes: {
         class: cn(
-          "min-h-44 max-h-80 overflow-y-auto px-2.5 py-1.5 text-sm outline-none",
+          "min-h-44 max-h-80 overflow-y-auto px-2.5 py-1.5 text-sm break-words outline-none",
           // content styling (no typography plugin)
           "[&_p]:my-0.5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5",
           "[&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-base [&_h3]:font-semibold",
           "[&_blockquote]:my-1 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground",
           "[&_a]:text-primary [&_a]:underline",
           "[&_img]:inline-block [&_img]:max-w-full",
+          "[&_pre]:my-1 [&_pre]:overflow-x-auto",
         ),
       },
     },
