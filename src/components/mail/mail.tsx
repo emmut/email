@@ -43,6 +43,8 @@ export function Mail() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [composeDraft, setComposeDraft] = useState<ComposeDraft | null>(null);
+  // Emails read while the unread tab is open stay listed until the view changes
+  const [keptReadIds, setKeptReadIds] = useState<Set<string>>(new Set());
   const [helpOpen, setHelpOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -71,15 +73,23 @@ export function Mail() {
   const selectFolder = (folder: string) => {
     setActiveFolder(folder);
     setSelectedId(null);
+    setKeptReadIds(new Set());
   };
 
   const selectMail = (id: string) => {
     setSelectedId(id);
     const mail = mails?.find((m) => m.id === id);
-    if (mail && !mail.read) markReadMutation.mutate(id);
+    if (mail && !mail.read) {
+      if (tab === "unread") {
+        setKeptReadIds((prev) => new Set(prev).add(id));
+      }
+      markReadMutation.mutate(id);
+    }
   };
 
-  const items = (mails ?? []).filter((m) => tab === "all" || !m.read);
+  const items = (mails ?? []).filter(
+    (m) => tab === "all" || !m.read || keptReadIds.has(m.id),
+  );
   const selected = mails?.find((m) => m.id === selectedId) ?? null;
 
   const { data: tags } = useQuery(tagsQuery);
@@ -115,7 +125,10 @@ export function Mail() {
       <SidebarInset className="h-screen overflow-hidden">
         <Tabs
           value={tab}
-          onValueChange={(v) => setTab(v as "all" | "unread")}
+          onValueChange={(v) => {
+            setTab(v as "all" | "unread");
+            setKeptReadIds(new Set());
+          }}
           className="flex h-full flex-col gap-0"
         >
           <header
