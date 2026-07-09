@@ -3,11 +3,14 @@ name: Build
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
 
 jobs:
   build:
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -16,8 +19,14 @@ jobs:
             bundles: |
               src-tauri/target/release/bundle/dmg/*.dmg
               src-tauri/target/release/bundle/macos/*.app
+            # .app is a directory — fine as CI artifact, but release assets must be plain files
+            release_files: src-tauri/target/release/bundle/dmg/*.dmg
           - platform: ubuntu-22.04
             bundles: |
+              src-tauri/target/release/bundle/deb/*.deb
+              src-tauri/target/release/bundle/rpm/*.rpm
+              src-tauri/target/release/bundle/appimage/*.AppImage
+            release_files: |
               src-tauri/target/release/bundle/deb/*.deb
               src-tauri/target/release/bundle/rpm/*.rpm
               src-tauri/target/release/bundle/appimage/*.AppImage
@@ -60,3 +69,11 @@ jobs:
           name: email-${{ matrix.platform }}
           path: ${{ matrix.bundles }}
           if-no-files-found: error
+
+      - name: Attach bundles to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.release_files }}
+          draft: true
+          fail_on_unmatched_files: true
