@@ -465,6 +465,14 @@ pub async fn add_google_account(
         .unwrap_or(0)
         == 0;
     let is_default = if is_first { 1 } else { 0 };
+    let is_first_google = db
+        .query_row(
+            "SELECT COUNT(*) FROM accounts WHERE kind = 'google'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        == 0;
 
     db.execute(
         "INSERT INTO accounts (id, kind, email, display_name, avatar_url, config, created_at, updated_at, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -481,10 +489,10 @@ pub async fn add_google_account(
         ],
     ).map_err(|e| e.to_string())?;
 
-    // If this is the first account, also initialize the Google AuthState for
-    // backward compat — including the legacy keychain entry, so gmail.ts's
+    // If this is the first Google account, also initialize the Google AuthState
+    // for backward compat — including the legacy keychain entry, so gmail.ts's
     // get_access_token keeps working after an app restart.
-    if is_first {
+    if is_first_google {
         oauth::store_refresh_token(refresh)?;
         let mut inner = auth.0.lock().await;
         inner.refresh = Some(refresh.to_string());
