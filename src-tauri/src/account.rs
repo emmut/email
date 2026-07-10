@@ -911,6 +911,87 @@ fn list_messages_blocking(
     Ok(messages)
 }
 
+fn sync_messages_blocking(
+    config: &IcloudAccountConfig,
+    folder: &str,
+    limit: usize,
+    last_uid: Option<u32>,
+) -> Result<Vec<IcloudMessageSummary>, String> {
+    let mut session = connect_imap(config)?;
+    session
+        .select(folder)
+        .map_err(|e| format!("select folder failed: {e}"))?;
+
+    let uid_range = match last_uid {
+        Some(uid) => format!("{}:*", uid + 1),
+        None => "1:*".to_string(),
+    };
+
+    let uids = session
+        .uid_search(format!("UID {uid_range}"))
+        .map_err(|e| format!("uid search failed: {e}"))?;
+    let mut uids: Vec<u32> = uids.into_iter().collect();
+    if uids.is_empty() {
+        let _ = session.logout();
+        return Ok(Vec::new());
+    }
+
+    uids.sort();
+    let total = uids.len();
+    let start = total.saturating_sub(limit);
+    let slice = &uids[start..];
+    let set: String = slice
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let fetches = session
+        .uid_fetch(&set, "(UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
+        .map_err(|e| format!("uid fetch failed: {e}"))?;
+
+    let mut messages = Vec::new();
+    for fetch in fetches.iter() {
+        let uid = fetch.uid.unwrap_or(0);
+        let envelope = fetch.envelope();
+        let (from_name, from_email) = parse_address(envelope.and_then(|e| e.from.as_ref()).and_then(|v| v.first()));
+        let to = envelope
+            .and_then(|e| e.to.as_ref())
+            .map(|v| v.iter().map(address_to_string).collect::<Vec<_>>().join(", "))
+            .unwrap_or_default();
+        let subject = envelope
+            .and_then(|e| e.subject)
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .unwrap_or_else(|| "(no subject)".to_string());
+        let message_id = envelope
+            .and_then(|e| e.message_id)
+            .map(|s| String::from_utf8_lossy(s).into_owned());
+        let date = envelope.and_then(|e| e.date).map(|s| String::from_utf8_lossy(s).into_owned());
+
+        let snippet = String::new();
+        let flags: Vec<String> = fetch.flags().iter().map(|x| x.to_string()).collect();
+        let read = flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen"));
+
+        messages.push(IcloudMessageSummary {
+            uid,
+            message_id,
+            from_name,
+            from_email,
+            to,
+            subject,
+            snippet,
+            date,
+            flags,
+            folder: folder.to_string(),
+            read,
+        });
+    }
+
+    messages.reverse();
+    let _ = session.logout();
+    Ok(messages)
+}
+
 fn fetch_message_blocking(
     config: &IcloudAccountConfig,
     folder: &str,
@@ -1173,17 +1254,23 @@ pub async fn cache_sync_icloud(
     folder: String,
     limit: Option<u32>,
 ) -> Result<u32, String> {
-    // Fetch from IMAP and store in cache
     let config = get_icloud_config(&state, &account_id).await?;
     let limit = limit.unwrap_or(50) as usize;
+
+    // Get last synced UID for incremental sync
+    let last_uid = cache
+        .get_sync_state(&account_id, &folder)
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|s| s.last_uid);
+
     let folder_clone = folder.clone();
     let messages = tauri::async_runtime::spawn_blocking(move || {
-        list_messages_blocking(&config, &folder_clone, limit)
+        sync_messages_blocking(&config, &folder_clone, limit, last_uid)
     })
     .await
     .map_err(|e| e.to_string())??;
 
-    // Convert to CachedMessage format
     let cached: Vec<crate::db::CachedMessage> = messages
         .into_iter()
         .map(|m| crate::db::CachedMessage {
