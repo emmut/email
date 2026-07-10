@@ -540,11 +540,12 @@ interface HistoryResponse {
   history?: unknown[];
 }
 
-export function useGmailSync(intervalMs = 30_000) {
+export function useGmailSync(enabled = true, intervalMs = 30_000) {
   const queryClient = useQueryClient();
   const lastHistoryId = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
 
     const tick = async () => {
@@ -577,5 +578,5 @@ export function useGmailSync(intervalMs = 30_000) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [queryClient, intervalMs]);
+  }, [queryClient, enabled, intervalMs]);
 }

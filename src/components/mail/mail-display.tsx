@@ -30,6 +30,8 @@ import {
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
 import { useMailActions } from "@/hooks/use-mail-actions";
 import { mailBodyQuery, profileQuery, type MailBody } from "@/lib/gmail";
+import { icloudMessageBodyQuery, parseIcloudMailId } from "@/lib/icloud";
+import { useAccount } from "@/context/AccountContext";
 
 function splitAddresses(raw: string): string[] {
   return raw
@@ -111,27 +113,44 @@ export function MailDisplay({
   const [draft, setDraft] = useState<ComposeDraft | null>(null);
   const [confirmTrash, setConfirmTrash] = useState(false);
 
-  const { data: profile } = useQuery(profileQuery);
+  const { activeAccount } = useAccount();
+  const icloudRef = mail ? parseIcloudMailId(mail.id) : null;
+  const isIcloud = icloudRef !== null;
 
-  const bodyQuery = useQuery({
+  const { data: profile } = useQuery({ ...profileQuery, enabled: !isIcloud });
+
+  const gmailBody = useQuery({
     ...mailBodyQuery(mail?.id ?? ""),
-    enabled: mail !== null,
+    enabled: mail !== null && !isIcloud,
   });
+  const icloudBody = useQuery({
+    ...icloudMessageBodyQuery(
+      activeAccount?.id ?? "",
+      icloudRef?.folder ?? "",
+      icloudRef?.uid ?? 0,
+    ),
+    enabled: isIcloud && !!activeAccount,
+  });
+  const bodyQuery = isIcloud ? icloudBody : gmailBody;
 
   const openReply = (all: boolean) => {
     if (!bodyQuery.data) return;
-    setDraft(
-      replyDraft(bodyQuery.data, all, profile?.emailAddress.toLowerCase() ?? ""),
-    );
+    const self = (activeAccount?.email ?? profile?.emailAddress ?? "").toLowerCase();
+    setDraft(replyDraft(bodyQuery.data, all, self));
   };
 
   const { act, isPending } = useMailActions(() => onDismiss());
 
+  // Archive/trash aren't implemented for iCloud (IMAP move) yet.
   useKeyboardShortcuts({
     r: () => mail && openReply(false),
     a: () => mail && openReply(true),
-    e: () => mail && act("archive", mail.id),
-    "#": () => mail && setConfirmTrash(true),
+    ...(isIcloud
+      ? {}
+      : {
+          e: () => mail && act("archive", mail.id),
+          "#": () => mail && setConfirmTrash(true),
+        }),
   });
 
   if (!mail) {
@@ -145,36 +164,40 @@ export function MailDisplay({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 p-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              disabled={isPending}
-              onClick={() => act("archive", mail.id)}
-            >
-              <Archive className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            Archive <Kbd>e</Kbd>
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              disabled={isPending}
-              onClick={() => setConfirmTrash(true)}
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            Move to trash <Kbd>#</Kbd>
-          </TooltipContent>
-        </Tooltip>
+        {!isIcloud && (
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={isPending}
+                  onClick={() => act("archive", mail.id)}
+                >
+                  <Archive className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Archive <Kbd>e</Kbd>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={isPending}
+                  onClick={() => setConfirmTrash(true)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Move to trash <Kbd>#</Kbd>
+              </TooltipContent>
+            </Tooltip>
+          </>
+        )}
         <AlertDialog open={confirmTrash} onOpenChange={setConfirmTrash}>
           <AlertDialogContent>
             <AlertDialogHeader>

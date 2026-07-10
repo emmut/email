@@ -1,6 +1,39 @@
+import DOMPurify from "dompurify";
 import { invoke } from "@tauri-apps/api/core";
 import { queryOptions } from "@tanstack/react-query";
 import type { Mail } from "@/components/mail/data";
+import type { MailBody } from "@/lib/gmail";
+
+// App folder ids (sidebar) → iCloud IMAP mailbox names.
+export const ICLOUD_FOLDER_NAMES: Record<string, string> = {
+  inbox: "INBOX",
+  drafts: "Drafts",
+  sent: "Sent Messages",
+  junk: "Junk",
+  trash: "Deleted Messages",
+  archive: "Archive",
+};
+
+export function icloudFolderName(folder: string): string {
+  return ICLOUD_FOLDER_NAMES[folder] ?? ICLOUD_FOLDER_NAMES.inbox;
+}
+
+// Mail ids for iCloud messages carry the mailbox and UID: "icloud:<folder>:<uid>".
+export function icloudMailId(folder: string, uid: number): string {
+  return `icloud:${folder}:${uid}`;
+}
+
+export function parseIcloudMailId(
+  id: string,
+): { folder: string; uid: number } | null {
+  if (!id.startsWith("icloud:")) return null;
+  const rest = id.slice("icloud:".length);
+  const sep = rest.lastIndexOf(":");
+  if (sep === -1) return null;
+  const uid = Number(rest.slice(sep + 1));
+  if (!Number.isFinite(uid)) return null;
+  return { folder: rest.slice(0, sep), uid };
+}
 
 export interface IcloudFolder {
   name: string;
@@ -37,20 +70,6 @@ export interface IcloudMessageDetail {
   folder: string;
 }
 
-export interface IcloudMailBody {
-  html: string | null;
-  text: string;
-  threadId: string;
-  subject: string;
-  from: string;
-  replyTo: string;
-  to: string;
-  cc: string;
-  messageId: string;
-  references: string;
-  date: string;
-}
-
 // --- queries ---
 
 export function icloudFoldersQuery(accountId: string) {
@@ -79,7 +98,7 @@ export function icloudMessagesQuery(accountId: string, folder: string, limit?: n
 export function icloudMessageBodyQuery(accountId: string, folder: string, uid: number) {
   return queryOptions({
     queryKey: ["icloud", accountId, "message", folder, uid],
-    queryFn: async (): Promise<IcloudMailBody> => {
+    queryFn: async (): Promise<MailBody> => {
       const detail = await invoke<IcloudMessageDetail>("icloud_fetch_message", {
         account_id: accountId,
         folder,
@@ -88,8 +107,14 @@ export function icloudMessageBodyQuery(accountId: string, folder: string, uid: n
       const from = detail.from_name
         ? `${detail.from_name} <${detail.from_email}>`
         : detail.from_email;
+      const html = detail.body_html
+        ? DOMPurify.sanitize(detail.body_html, {
+            USE_PROFILES: { html: true },
+            FORBID_TAGS: ["form", "input", "button", "select", "textarea"],
+          })
+        : null;
       return {
-        html: detail.body_html,
+        html,
         text: detail.body_text,
         threadId: detail.message_id,
         subject: detail.subject,
@@ -143,7 +168,7 @@ export function icloudMarkRead(accountId: string, folder: string, uid: number, r
 
 export function toMail(msg: IcloudMessageSummary): Mail {
   return {
-    id: `icloud:${msg.uid}`,
+    id: icloudMailId(msg.folder, msg.uid),
     name: msg.from_name ?? msg.from_email.split("@")[0],
     email: msg.from_email,
     subject: msg.subject || "(no subject)",
@@ -155,6 +180,3 @@ export function toMail(msg: IcloudMessageSummary): Mail {
   };
 }
 
-export function toMailBody(body: IcloudMailBody) {
-  return body;
-}

@@ -35,6 +35,15 @@ import {
   tagsQuery,
   useGmailSync,
 } from "@/lib/gmail";
+import {
+  icloudFolderName,
+  icloudMarkRead,
+  icloudMessagesQuery,
+  parseIcloudMailId,
+  toMail,
+  type IcloudMessageSummary,
+} from "@/lib/icloud";
+import { useAccount } from "@/context/AccountContext";
 
 export function Mail() {
   const [activeFolder, setActiveFolder] = useState("inbox");
@@ -48,7 +57,10 @@ export function Mail() {
   const [helpOpen, setHelpOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  useGmailSync();
+  const { activeAccount } = useAccount();
+  const isIcloud = activeAccount?.kind === "icloud";
+
+  useGmailSync(!isIcloud);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -56,18 +68,61 @@ export function Mail() {
   }, [search]);
 
   const queryClient = useQueryClient();
-  const listQuery = mailListQuery(activeFolder, debouncedSearch);
-  const { data: mails, isPending, isError, error, refetch } = useQuery(listQuery);
+  const gmailList = mailListQuery(activeFolder, debouncedSearch);
+  const gmailQuery = useQuery({ ...gmailList, enabled: !isIcloud });
+  const icloudList = icloudMessagesQuery(
+    activeAccount?.id ?? "",
+    icloudFolderName(activeFolder),
+  );
+  const icloudQuery = useQuery({
+    ...icloudList,
+    enabled: isIcloud,
+    select: (msgs) => msgs.map(toMail),
+  });
+
+  // iCloud has no server-side search wired up — filter the fetched page.
+  const matchesSearch = (m: MailItem) => {
+    if (!debouncedSearch) return true;
+    const q = debouncedSearch.toLowerCase();
+    return [m.name, m.email, m.subject, m.text].some((s) =>
+      s.toLowerCase().includes(q),
+    );
+  };
+  const mails = isIcloud
+    ? icloudQuery.data?.filter(matchesSearch)
+    : gmailQuery.data;
+  const { isPending, isError, error, refetch } = isIcloud
+    ? icloudQuery
+    : gmailQuery;
 
   const markReadMutation = useMutation({
-    mutationFn: markRead,
-    onMutate: (id: string) => {
-      queryClient.setQueryData(listQuery.queryKey, (old: MailItem[] | undefined) =>
-        old?.map((m) => (m.id === id ? { ...m, read: true } : m)),
-      );
+    mutationFn: async (id: string) => {
+      const ref = parseIcloudMailId(id);
+      if (ref && activeAccount) {
+        await icloudMarkRead(activeAccount.id, ref.folder, ref.uid, true);
+      } else {
+        await markRead(id);
+      }
     },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["gmail", "counts"] }),
+    onMutate: (id: string) => {
+      const ref = parseIcloudMailId(id);
+      if (ref) {
+        queryClient.setQueryData(
+          icloudList.queryKey,
+          (old: IcloudMessageSummary[] | undefined) =>
+            old?.map((m) => (m.uid === ref.uid ? { ...m, read: true } : m)),
+        );
+      } else {
+        queryClient.setQueryData(gmailList.queryKey, (old: MailItem[] | undefined) =>
+          old?.map((m) => (m.id === id ? { ...m, read: true } : m)),
+        );
+      }
+    },
+    onSuccess: (_data, id) => {
+      if (!parseIcloudMailId(id)) {
+        queryClient.invalidateQueries({ queryKey: ["gmail", "counts"] });
+      }
+    },
   });
 
   const selectFolder = (folder: string) => {
@@ -92,7 +147,7 @@ export function Mail() {
   );
   const selected = mails?.find((m) => m.id === selectedId) ?? null;
 
-  const { data: tags } = useQuery(tagsQuery);
+  const { data: tags } = useQuery({ ...tagsQuery, enabled: !isIcloud });
   const activeTagId = tagIdFromFolder(activeFolder);
   const title = activeTagId
     ? (tags?.find((t) => t.id === activeTagId)?.name ?? "Tag")

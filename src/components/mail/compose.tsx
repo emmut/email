@@ -89,14 +89,17 @@ function ComposeForm({
   onClose: () => void;
 }) {
   // The editor takes its content at mount, so wait for the signature first.
-  const signature = useQuery(signatureQuery);
+  // Signatures come from Gmail settings — skip for iCloud accounts.
+  const { activeAccount } = useAccount();
+  const isIcloud = activeAccount?.kind === "icloud";
+  const signature = useQuery({ ...signatureQuery, enabled: !isIcloud });
 
   return (
     <DialogContent className="sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle>{draft.inReplyTo ? "Reply" : "New message"}</DialogTitle>
       </DialogHeader>
-      {signature.isPending ? (
+      {!isIcloud && signature.isPending ? (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-8 w-full" />
           <Skeleton className="h-8 w-full" />
@@ -130,7 +133,11 @@ function ComposeFields({
   const [subject, setSubject] = useState(draft.subject ?? "");
   const [tagIds, setTagIds] = useState<string[]>([]);
 
-  const { data: tags } = useQuery(tagsQuery);
+  const selectedIsIcloud =
+    accounts.find((a) => a.id === selectedAccountId)?.kind === "icloud";
+
+  // Tags and contact autocomplete are Gmail features.
+  const { data: tags } = useQuery({ ...tagsQuery, enabled: !selectedIsIcloud });
 
   const toggleTag = (id: string) =>
     setTagIds((prev) =>
@@ -144,7 +151,7 @@ function ComposeFields({
   const [body, setBody] = useState(() => ({ html: initialHtml, text: "" }));
 
   const { data: contacts, isError: contactsFailed, error: contactsError } =
-    useQuery(contactsQuery);
+    useQuery({ ...contactsQuery, enabled: !selectedIsIcloud });
 
   const queryClient = useQueryClient();
   const sendMutation = useMutation({
@@ -270,7 +277,7 @@ function ComposeFields({
         autoFocus={isReply}
         onChange={(html, text) => setBody({ html, text })}
       />
-      {tags?.length ? (
+      {!selectedIsIcloud && tags?.length ? (
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-muted-foreground text-xs">Tags:</span>
           {tags.map((tag) => (

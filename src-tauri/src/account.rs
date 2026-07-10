@@ -14,8 +14,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
-use tokio::net::TcpStream;
-use tokio::time::{timeout, Duration};
 use uuid::Uuid;
 
 use crate::oauth::{self, AuthState};
@@ -210,38 +208,24 @@ async fn fetch_google_profile(access_token: &str) -> Result<GoogleProfile, Strin
 #[allow(dead_code)]
 struct GoogleProfile {
     email: String,
-    #[serde(rename = "email_address")]
-    email_address: String,
     name: Option<String>,
     picture: Option<String>,
 }
 
-async fn test_icloud_connection(
-    imap_server: &str,
-    imap_port: u16,
-    smtp_server: &str,
-    smtp_port: u16,
-) -> Result<(), String> {
-    // Test IMAP (with TLS)
-    let imap_addr = format!("{}:{}", imap_server, imap_port);
-    let _ = timeout(Duration::from_secs(10), TcpStream::connect(&imap_addr))
-        .await
-        .map_err(|_| format!("IMAP connection timeout to {}", imap_addr))?
-        .map_err(|e| format!("IMAP connection failed: {e}"))?;
-
-    // Test SMTP (with STARTTLS)
-    let smtp_addr = format!("{}:{}", smtp_server, smtp_port);
-    let _ = timeout(Duration::from_secs(10), TcpStream::connect(&smtp_addr))
-        .await
-        .map_err(|_| format!("SMTP connection timeout to {}", smtp_addr))?
-        .map_err(|e| format!("SMTP connection failed: {e}"))?;
-
-    Ok(())
+/// Validates the credentials by actually logging in over IMAP.
+async fn test_icloud_connection(config: IcloudAccountConfig) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = connect_imap(&config)?;
+        let _ = session.logout();
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // --- Tauri Commands ---
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn list_accounts(state: State<'_, AccountState>) -> Result<Vec<Account>, String> {
     let db = state.db.lock().await;
     let mut stmt = db
@@ -276,7 +260,7 @@ pub async fn list_accounts(state: State<'_, AccountState>) -> Result<Vec<Account
     Ok(accounts)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn add_google_account(
     app: AppHandle,
     state: State<'_, AccountState>,
@@ -353,7 +337,7 @@ pub async fn add_google_account(
     let account = Account {
         id: account_id.clone(),
         kind: AccountKind::Google,
-        email: profile.email_address,
+        email: profile.email,
         display_name,
         avatar_url: profile.picture,
         created_at: now,
@@ -390,8 +374,11 @@ pub async fn add_google_account(
         ],
     ).map_err(|e| e.to_string())?;
 
-    // If this is the first account, also initialize the Google AuthState for backward compat
+    // If this is the first account, also initialize the Google AuthState for
+    // backward compat — including the legacy keychain entry, so gmail.ts's
+    // get_access_token keeps working after an app restart.
     if is_first {
+        oauth::store_refresh_token(refresh)?;
         let mut inner = auth.0.lock().await;
         inner.refresh = Some(refresh.to_string());
         inner.keychain_loaded = true;
@@ -401,7 +388,7 @@ pub async fn add_google_account(
     Ok(account)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn add_icloud_account(
     state: State<'_, AccountState>,
     email: String,
@@ -417,8 +404,17 @@ pub async fn add_icloud_account(
     let smtp_server = smtp_server.unwrap_or_else(|| "smtp.mail.me.com".to_string());
     let smtp_port = smtp_port.unwrap_or(587);
 
-    // Validate credentials by testing connection
-    test_icloud_connection(&imap_server, imap_port, &smtp_server, smtp_port).await?;
+    let icloud_config = IcloudAccountConfig {
+        email: email.clone(),
+        app_password: app_password.clone(),
+        imap_server,
+        imap_port,
+        smtp_server,
+        smtp_port,
+    };
+
+    // Validate the credentials with a real IMAP login before storing anything.
+    test_icloud_connection(icloud_config.clone()).await?;
 
     let account_id = Uuid::new_v4().to_string();
     store_secret(&account_id, &app_password)?;
@@ -436,14 +432,7 @@ pub async fn add_icloud_account(
         is_default: false,
     };
 
-    let config = AccountConfig::Icloud(IcloudAccountConfig {
-        email: email.clone(),
-        app_password: app_password.clone(),
-        imap_server: imap_server.clone(),
-        imap_port,
-        smtp_server: smtp_server.clone(),
-        smtp_port,
-    });
+    let config = AccountConfig::Icloud(icloud_config);
 
     let db = state.db.lock().await;
     let is_first = db
@@ -470,38 +459,51 @@ pub async fn add_icloud_account(
     Ok(account)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn remove_account(
-    _app: AppHandle,
     state: State<'_, AccountState>,
+    cache: State<'_, crate::db::CacheDb>,
     account_id: String,
 ) -> Result<(), String> {
     // Delete from Keychain
     delete_secret(&account_id)?;
 
     // Delete from DB
-    let db = state.db.lock().await;
-    db.execute("DELETE FROM accounts WHERE id = ?1", params![&account_id])
-        .map_err(|e| e.to_string())?;
-
-    // If this was the default account, promote another
-    let new_default: Option<String> = db
-        .query_row(
-            "SELECT id FROM accounts ORDER BY created_at ASC LIMIT 1",
-            [],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
-    if let Some(id) = new_default {
-        db.execute("UPDATE accounts SET is_default = 1 WHERE id = ?1", params![&id])
+    {
+        let db = state.db.lock().await;
+        db.execute("DELETE FROM accounts WHERE id = ?1", params![&account_id])
             .map_err(|e| e.to_string())?;
+
+        // If no default account remains, promote the oldest one.
+        let has_default: bool = db
+            .query_row("SELECT COUNT(*) FROM accounts WHERE is_default = 1", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .map_err(|e| e.to_string())?
+            > 0;
+        if !has_default {
+            let new_default: Option<String> = db
+                .query_row(
+                    "SELECT id FROM accounts ORDER BY created_at ASC LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            if let Some(id) = new_default {
+                db.execute("UPDATE accounts SET is_default = 1 WHERE id = ?1", params![&id])
+                    .map_err(|e| e.to_string())?;
+            }
+        }
     }
+
+    // Drop any cached mail for the account
+    cache.delete_account_cache(&account_id).await?;
 
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn set_default_account(
     state: State<'_, AccountState>,
     account_id: String,
@@ -519,7 +521,7 @@ pub async fn set_default_account(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_account_config(
     state: State<'_, AccountState>,
     account_id: String,
@@ -527,7 +529,7 @@ pub async fn get_account_config(
     get_account_config_inner(&state, &account_id).await
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn update_account_display_name(
     state: State<'_, AccountState>,
     account_id: String,
@@ -542,7 +544,7 @@ pub async fn update_account_display_name(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_google_access_token(
     state: State<'_, AccountState>,
     account_id: String,
@@ -599,7 +601,7 @@ pub async fn get_google_access_token(
     Ok(tokens.access_token)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn get_icloud_credentials(
     state: State<'_, AccountState>,
     account_id: String,
@@ -711,7 +713,7 @@ pub struct IcloudMessageDetail {
     pub folder: String,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_list_folders(
     state: State<'_, AccountState>,
     account_id: String,
@@ -722,7 +724,7 @@ pub async fn icloud_list_folders(
         .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_list_messages(
     state: State<'_, AccountState>,
     account_id: String,
@@ -738,7 +740,7 @@ pub async fn icloud_list_messages(
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_fetch_message(
     state: State<'_, AccountState>,
     account_id: String,
@@ -751,7 +753,7 @@ pub async fn icloud_fetch_message(
         .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_send_message(
     state: State<'_, AccountState>,
     account_id: String,
@@ -773,7 +775,7 @@ pub async fn icloud_send_message(
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_mark_read(
     state: State<'_, AccountState>,
     account_id: String,
@@ -931,7 +933,12 @@ fn sync_messages_blocking(
     let uids = session
         .uid_search(format!("UID {uid_range}"))
         .map_err(|e| format!("uid search failed: {e}"))?;
-    let mut uids: Vec<u32> = uids.into_iter().collect();
+    // "UID n:*" always matches the highest-UID message even when its UID < n,
+    // so with no new mail the newest message comes back every time — drop it.
+    let mut uids: Vec<u32> = uids
+        .into_iter()
+        .filter(|u| last_uid.is_none_or(|last| *u > last))
+        .collect();
     if uids.is_empty() {
         let _ = session.logout();
         return Ok(Vec::new());
@@ -1143,10 +1150,16 @@ fn smtp_send_blocking(
     };
 
     let creds = Credentials::new(
-        from_email.to_string(),
+        config.email.clone(),
         config.app_password.clone(),
     );
-    let mailer: AsyncSmtpTransport<Tokio1Executor> = AsyncSmtpTransport::<Tokio1Executor>::relay(&config.smtp_server)
+    // Port 465 is implicit TLS; 587 (iCloud's default) requires STARTTLS.
+    let builder = if config.smtp_port == 465 {
+        AsyncSmtpTransport::<Tokio1Executor>::relay(&config.smtp_server)
+    } else {
+        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.smtp_server)
+    };
+    let mailer: AsyncSmtpTransport<Tokio1Executor> = builder
         .map_err(|e| e.to_string())?
         .port(config.smtp_port)
         .credentials(creds)
@@ -1215,7 +1228,7 @@ fn collect_parts(
 
 // --- Cache commands ---
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn cache_list_messages(
     cache: State<'_, crate::db::CacheDb>,
     account_id: String,
@@ -1226,7 +1239,7 @@ pub async fn cache_list_messages(
     cache.list_messages(&account_id, &folder, limit).await
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn cache_get_message(
     cache: State<'_, crate::db::CacheDb>,
     account_id: String,
@@ -1236,7 +1249,7 @@ pub async fn cache_get_message(
     cache.get_message(&account_id, &folder, uid).await
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn cache_mark_read(
     cache: State<'_, crate::db::CacheDb>,
     account_id: String,
@@ -1247,7 +1260,7 @@ pub async fn cache_mark_read(
     cache.mark_read(&account_id, &folder, uid, read).await
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn cache_sync_icloud(
     state: State<'_, AccountState>,
     cache: State<'_, crate::db::CacheDb>,
@@ -1299,7 +1312,7 @@ pub async fn cache_sync_icloud(
     Ok(count)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn cache_delete_account(
     cache: State<'_, crate::db::CacheDb>,
     account_id: String,

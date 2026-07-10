@@ -1,14 +1,29 @@
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Inbox } from "lucide-react";
+import { Cloud, Inbox } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { signIn } from "@/lib/auth";
+import { Input } from "@/components/ui/input";
+import { useAccount } from "@/context/AccountContext";
 
 export function SignIn() {
   const queryClient = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: signIn,
+  const { addGoogleAccount, addICloudAccount } = useAccount();
+  const [showICloud, setShowICloud] = useState(false);
+  const [icloudEmail, setIcloudEmail] = useState("");
+  const [icloudPassword, setIcloudPassword] = useState("");
+
+  const googleMutation = useMutation({
+    mutationFn: addGoogleAccount,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["auth"] }),
   });
+
+  const icloudMutation = useMutation({
+    mutationFn: () => addICloudAccount(icloudEmail.trim(), icloudPassword),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["auth"] }),
+  });
+
+  const isPending = googleMutation.isPending || icloudMutation.isPending;
+  const error = googleMutation.error ?? icloudMutation.error;
 
   return (
     <div className="flex h-svh flex-col items-center justify-center gap-6">
@@ -18,16 +33,79 @@ export function SignIn() {
         </div>
         <h1 className="text-2xl font-semibold">Email</h1>
         <p className="text-muted-foreground max-w-sm text-sm">
-          Sign in with your Google account to load your inbox. Your browser
-          will open to complete the sign-in.
+          Sign in with a Google or iCloud account to load your inbox.
         </p>
       </div>
-      <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
-        {mutation.isPending ? "Waiting for browser…" : "Sign in with Google"}
-      </Button>
-      {mutation.isError && (
+      {showICloud ? (
+        <form
+          className="flex w-64 flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (icloudEmail.trim() && icloudPassword) icloudMutation.mutate();
+          }}
+        >
+          <Input
+            autoFocus
+            placeholder="iCloud email"
+            type="email"
+            value={icloudEmail}
+            onChange={(e) => setIcloudEmail(e.target.value)}
+          />
+          <Input
+            placeholder="App-specific password"
+            type="password"
+            value={icloudPassword}
+            onChange={(e) => setIcloudPassword(e.target.value)}
+          />
+          <p className="text-muted-foreground text-xs">
+            Generate an app-specific password at{" "}
+            <a
+              href="https://appleid.apple.com"
+              target="_blank"
+              rel="noopener"
+              className="underline"
+            >
+              appleid.apple.com
+            </a>
+          </p>
+          <Button
+            type="submit"
+            disabled={isPending || !icloudEmail.trim() || !icloudPassword}
+          >
+            {icloudMutation.isPending ? "Signing in…" : "Sign in with iCloud"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={isPending}
+            onClick={() => setShowICloud(false)}
+          >
+            Back
+          </Button>
+        </form>
+      ) : (
+        <div className="flex w-64 flex-col gap-3">
+          <Button
+            onClick={() => googleMutation.mutate()}
+            disabled={isPending}
+          >
+            {googleMutation.isPending
+              ? "Waiting for browser…"
+              : "Sign in with Google"}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={isPending}
+            onClick={() => setShowICloud(true)}
+          >
+            <Cloud className="size-4" />
+            Sign in with iCloud
+          </Button>
+        </div>
+      )}
+      {error != null && (
         <p className="text-destructive max-w-sm text-center text-sm">
-          {String(mutation.error)}
+          {String(error)}
         </p>
       )}
     </div>

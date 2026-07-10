@@ -108,11 +108,12 @@ export function MailSidebar({
   onSelectFolder: (id: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const { accounts, activeAccount, activeAccountId, switchAccount, addGoogleAccount, addICloudAccount, isLoading } = useAccount();
-  const { data: profile } = useQuery(profileQuery);
-  const { data: counts } = useQuery(folderCountsQuery);
-  const { data: tags } = useQuery(tagsQuery);
-  const { data: avatar } = useQuery(avatarQuery);
+  const { accounts, activeAccount, activeAccountId, switchAccount, addGoogleAccount, addICloudAccount, removeAccount, isLoading } = useAccount();
+  const isIcloud = activeAccount?.kind === "icloud";
+  const { data: profile } = useQuery({ ...profileQuery, enabled: !isIcloud });
+  const { data: counts } = useQuery({ ...folderCountsQuery, enabled: !isIcloud });
+  const { data: tags } = useQuery({ ...tagsQuery, enabled: !isIcloud });
+  const { data: avatar } = useQuery({ ...avatarQuery, enabled: !isIcloud });
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Tag | null>(null);
@@ -141,10 +142,25 @@ export function MailSidebar({
   });
 
   const signOutMutation = useMutation({
-    mutationFn: () => invoke("sign_out"),
+    mutationFn: async () => {
+      if (activeAccount) {
+        const lastGoogle =
+          activeAccount.kind === "google" &&
+          accounts.filter((a) => a.kind === "google").length === 1;
+        await removeAccount(activeAccount.id);
+        // The legacy keychain token belongs to the first Google account —
+        // clear it when the last Google account goes away.
+        if (lastGoogle) await invoke("sign_out");
+      } else {
+        // Legacy Google sign-in with no account row.
+        await invoke("sign_out");
+      }
+    },
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: ["gmail"] });
+      queryClient.removeQueries({ queryKey: ["icloud"] });
       queryClient.invalidateQueries({ queryKey: ["auth"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
   });
 
@@ -256,6 +272,7 @@ export function MailSidebar({
             })}
           </SidebarMenu>
         </SidebarGroup>
+        {!isIcloud && (
         <SidebarGroup>
           <SidebarGroupLabel>Tags</SidebarGroupLabel>
           <SidebarGroupAction
@@ -295,6 +312,7 @@ export function MailSidebar({
             })}
           </SidebarMenu>
         </SidebarGroup>
+        )}
       </SidebarContent>
       <AlertDialog
         open={deleteTarget !== null}
