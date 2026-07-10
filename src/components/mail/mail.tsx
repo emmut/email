@@ -40,6 +40,7 @@ import {
   icloudFolderName,
   icloudLocalMessagesQuery,
   icloudMessagesQuery,
+  icloudSearchQuery,
   toMail,
 } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
@@ -92,25 +93,45 @@ export function Mail() {
     enabled: isIcloud,
     select: (msgs) => msgs.map(toMail),
   });
+  // Server-side full-mailbox search; the client filter over the cached page
+  // stands in while it loads (or offline).
+  const icloudSearch = useQuery({
+    ...icloudSearchQuery(
+      activeAccount?.id ?? "",
+      icloudFolderName(activeFolder),
+      debouncedSearch,
+    ),
+    enabled: isIcloud && !!debouncedSearch,
+    select: (msgs) => msgs.map(toMail),
+  });
 
-  // iCloud has no server-side search wired up — filter the fetched page.
   const matchesSearch = (m: MailItem) => {
-    if (!debouncedSearch) return true;
     const q = debouncedSearch.toLowerCase();
     return [m.name, m.email, m.subject, m.text].some((s) =>
       s.toLowerCase().includes(q),
     );
   };
-  const networkQuery = isIcloud ? icloudQuery : gmailQuery;
-  const localData = isIcloud
-    ? icloudLocal.data
-    : debouncedSearch
-      ? undefined
-      : (gmailLocal.data ?? undefined);
+  const networkQuery = isIcloud
+    ? debouncedSearch
+      ? icloudSearch
+      : icloudQuery
+    : gmailQuery;
   // Cache is a fallback, not truth: only stand in while the network query has
   // nothing, and only if it actually holds messages.
-  const listData = networkQuery.data ?? (localData?.length ? localData : undefined);
-  const mails = isIcloud ? listData?.filter(matchesSearch) : listData;
+  let listData: MailItem[] | undefined;
+  if (isIcloud) {
+    const cached = icloudQuery.data ?? icloudLocal.data;
+    listData = debouncedSearch
+      ? (icloudSearch.data ?? cached?.filter(matchesSearch))
+      : (icloudQuery.data ?? (icloudLocal.data?.length ? icloudLocal.data : undefined));
+  } else {
+    listData =
+      gmailQuery.data ??
+      (!debouncedSearch && gmailLocal.data?.length
+        ? gmailLocal.data
+        : undefined);
+  }
+  const mails = listData;
   const isPending = networkQuery.isPending && listData === undefined;
   const isError = networkQuery.isError && listData === undefined;
   const { error, refetch } = networkQuery;

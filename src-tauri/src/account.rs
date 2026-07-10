@@ -732,13 +732,6 @@ fn respond_html(request: tiny_http::Request, message: &str) {
 // --- iCloud IMAP/SMTP commands ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IcloudFolder {
-    pub name: String,
-    pub delimiter: String,
-    pub attributes: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IcloudMessageSummary {
     pub uid: u32,
     pub message_id: Option<String>,
@@ -769,27 +762,15 @@ pub struct IcloudMessageDetail {
     pub folder: String,
 }
 
+/// Server-side full-mailbox search (IMAP SEARCH TEXT) — covers messages far
+/// beyond the locally cached page.
 #[tauri::command(rename_all = "snake_case")]
-pub async fn icloud_list_folders(
-    state: State<'_, AccountState>,
-    pool: State<'_, ImapPool>,
-    account_id: String,
-) -> Result<Vec<IcloudFolder>, String> {
-    let config = get_icloud_config(&state, &account_id).await?;
-    let pool = pool.0.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        with_imap(&pool, &account_id, &config, list_folders_blocking)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn icloud_list_messages(
+pub async fn icloud_search_messages(
     state: State<'_, AccountState>,
     pool: State<'_, ImapPool>,
     account_id: String,
     folder: String,
+    query: String,
     limit: Option<u32>,
 ) -> Result<Vec<IcloudMessageSummary>, String> {
     let config = get_icloud_config(&state, &account_id).await?;
@@ -797,7 +778,7 @@ pub async fn icloud_list_messages(
     let pool = pool.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_imap(&pool, &account_id, &config, |s| {
-            list_messages_blocking(s, &folder, limit)
+            search_messages_blocking(s, &folder, &query, limit)
         })
     })
     .await
@@ -1031,50 +1012,47 @@ fn connect_imap(config: &IcloudAccountConfig) -> Result<ImapSession, String> {
     Ok(session)
 }
 
-fn list_folders_blocking(session: &mut ImapSession) -> Result<Vec<IcloudFolder>, String> {
-    let folders = session
-        .list(Some(""), Some("*"))
-        .map_err(|e| format!("list folders failed: {e}"))?;
-    let mut out = Vec::new();
-    for f in folders.iter() {
-        out.push(IcloudFolder {
-            name: f.name().to_string(),
-            delimiter: f.delimiter().unwrap_or("").to_string(),
-            attributes: f.attributes().iter().map(|a| format!("{a:?}")).collect(),
-        });
-    }
-    Ok(out)
-}
-
-fn list_messages_blocking(
+fn search_messages_blocking(
     session: &mut ImapSession,
     folder: &str,
+    query: &str,
     limit: usize,
 ) -> Result<Vec<IcloudMessageSummary>, String> {
     session
         .select(folder)
         .map_err(|e| format!("select folder failed: {e}"))?;
 
-    let seqs = session
-        .search("ALL")
-        .map_err(|e| format!("search failed: {e}"))?;
-    let mut seqs: Vec<u32> = seqs.into_iter().collect();
-    let total = seqs.len();
-    if total == 0 {
+    // Strip quotes/backslashes/control chars — the query lands inside an IMAP
+    // quoted string.
+    let clean: String = query
+        .chars()
+        .filter(|c| !c.is_control() && *c != '"' && *c != '\\')
+        .collect();
+    if clean.trim().is_empty() {
         return Ok(Vec::new());
     }
-    // Take the most recent `limit` by sequence number (highest = newest).
-    seqs.sort();
-    let start = total.saturating_sub(limit);
-    let slice = &seqs[start..];
-    let set: String = slice
+
+    // Non-ASCII needs an explicit charset; some servers reject it, so fall
+    // back to the plain form rather than failing the search outright.
+    let uids = session
+        .uid_search(format!("CHARSET UTF-8 TEXT \"{clean}\""))
+        .or_else(|_| session.uid_search(format!("TEXT \"{clean}\"")))
+        .map_err(|e| format!("search failed: {e}"))?;
+
+    let mut uids: Vec<u32> = uids.into_iter().collect();
+    if uids.is_empty() {
+        return Ok(Vec::new());
+    }
+    uids.sort();
+    let start = uids.len().saturating_sub(limit);
+    let set: String = uids[start..]
         .iter()
-        .map(|s| s.to_string())
+        .map(|u| u.to_string())
         .collect::<Vec<_>>()
         .join(",");
 
     let fetches = session
-        .fetch(&set, "(UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
+        .uid_fetch(&set, "(UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
         .map_err(|e| format!("fetch failed: {e}"))?;
 
     let mut messages: Vec<IcloudMessageSummary> = fetches

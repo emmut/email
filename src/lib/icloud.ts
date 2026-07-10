@@ -36,12 +36,6 @@ export function parseIcloudMailId(
   return { folder: rest.slice(0, sep), uid };
 }
 
-export interface IcloudFolder {
-  name: string;
-  delimiter: string;
-  attributes: string[];
-}
-
 export interface IcloudMessageSummary {
   uid: number;
   message_id: string | null;
@@ -73,15 +67,6 @@ export interface IcloudMessageDetail {
 
 // --- queries ---
 
-export function icloudFoldersQuery(accountId: string) {
-  return queryOptions({
-    queryKey: ["icloud", accountId, "folders"],
-    queryFn: () => invoke<IcloudFolder[]>("icloud_list_folders", { account_id: accountId }),
-    enabled: !!accountId,
-    staleTime: 5 * 60_000,
-  });
-}
-
 // Sync-then-read: an incremental IMAP pass (new UIDs, flag refresh, vanished
 // detection) updates SQLite, then the list is served from SQLite. If the sync
 // fails but the cache has content, the cached list is shown (offline mode).
@@ -109,6 +94,26 @@ export function icloudMessagesQuery(accountId: string, folder: string, limit?: n
       return messages;
     },
     enabled: !!accountId && !!folder,
+    staleTime: 30_000,
+    // Poll for new mail like the Gmail history sync does. Cheap now that the
+    // IMAP session is pooled and the sync is an incremental delta.
+    refetchInterval: 30_000,
+  });
+}
+
+// Server-side full-mailbox search (IMAP SEARCH). Keyed under the same
+// "messages" prefix so optimistic read/remove updates apply to results too.
+export function icloudSearchQuery(accountId: string, folder: string, query: string) {
+  return queryOptions({
+    queryKey: ["icloud", accountId, "messages", folder, "search", query],
+    queryFn: () =>
+      invoke<IcloudMessageSummary[]>("icloud_search_messages", {
+        account_id: accountId,
+        folder,
+        query,
+        limit: 50,
+      }),
+    enabled: !!accountId && !!folder && !!query,
     staleTime: 30_000,
   });
 }
@@ -189,6 +194,7 @@ export function icloudFolderCountsQuery(accountId: string) {
     },
     enabled: !!accountId,
     staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 }
 
