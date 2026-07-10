@@ -111,6 +111,7 @@ export function icloudMessageBodyQuery(accountId: string, folder: string, uid: n
 
 export function icloudSendMessage(params: {
   accountId: string;
+  fromEmail: string;
   to: string;
   cc?: string;
   bcc?: string;
@@ -122,6 +123,7 @@ export function icloudSendMessage(params: {
 }) {
   return invoke<void>("icloud_send_message", {
     account_id: params.accountId,
+    from_email: params.fromEmail,
     to: params.to,
     cc: params.cc ?? null,
     bcc: params.bcc ?? null,

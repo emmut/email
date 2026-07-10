@@ -154,6 +154,7 @@ function ComposeFields({
         // Send via iCloud IMAP/SMTP
         await icloudSendMessage({
           accountId: selectedAccount.id,
+          fromEmail: selectedAccount.email,
           to: msg.to,
           cc: msg.cc,
           bcc: msg.bcc,

@@ -754,6 +754,7 @@ pub async fn icloud_fetch_message(
 pub async fn icloud_send_message(
     state: State<'_, AccountState>,
     account_id: String,
+    from_email: String,
     to: String,
     cc: Option<String>,
     bcc: Option<String>,
@@ -765,7 +766,7 @@ pub async fn icloud_send_message(
 ) -> Result<(), String> {
     let config = get_icloud_config(&state, &account_id).await?;
     tauri::async_runtime::spawn_blocking(move || {
-        smtp_send_blocking(&config, &to, cc.as_deref(), bcc.as_deref(), &subject, &body_text, body_html.as_deref(), in_reply_to.as_deref(), references.as_deref())
+        smtp_send_blocking(&config, &from_email, &to, cc.as_deref(), bcc.as_deref(), &subject, &body_text, body_html.as_deref(), in_reply_to.as_deref(), references.as_deref())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -994,6 +995,7 @@ fn mark_read_blocking(
 
 fn smtp_send_blocking(
     config: &IcloudAccountConfig,
+    from_email: &str,
     to: &str,
     cc: Option<&str>,
     bcc: Option<&str>,
@@ -1008,13 +1010,9 @@ fn smtp_send_blocking(
     use lettre::transport::smtp::authentication::Credentials;
     use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
-    let from_addr: Mailbox = config
-        .app_password
-        .split(':')
-        .next()
-        .ok_or("invalid app password")?
+    let from_addr: Mailbox = from_email
         .parse::<Mailbox>()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("invalid from address: {e}"))?;
 
     let mut builder = Message::builder()
         .from(from_addr)
@@ -1063,12 +1061,7 @@ fn smtp_send_blocking(
     };
 
     let creds = Credentials::new(
-        config
-            .app_password
-            .split(':')
-            .next()
-            .unwrap_or("")
-            .to_string(),
+        from_email.to_string(),
         config.app_password.clone(),
     );
     let mailer: AsyncSmtpTransport<Tokio1Executor> = AsyncSmtpTransport::<Tokio1Executor>::relay(&config.smtp_server)
