@@ -28,14 +28,27 @@ jobs:
               src-tauri/target/release/bundle/deb/*.deb
               src-tauri/target/release/bundle/rpm/*.rpm
               src-tauri/target/release/bundle/appimage/*.AppImage
+          # native Arch build in a container; the deb gets repackaged by makepkg
+          - platform: ubuntu-latest
+            container: archlinux:base-devel
+            artifact: arch
+            build_args: --bundles deb
+            bundles: packaging/arch/*.pkg.tar.zst
+            release_files: packaging/arch/*.pkg.tar.zst
 
     runs-on: ${{ matrix.platform }}
+    container: ${{ matrix.container }}
 
     steps:
+      # before checkout so it runs in git mode instead of falling back to the REST API
+      - name: Install Arch dependencies
+        if: matrix.container
+        run: pacman -Syu --noconfirm git zstd webkit2gtk-4.1 openssl appmenu-gtk-module libayatana-appindicator librsvg xdotool file
+
       - uses: actions/checkout@v7
 
       - name: Install Linux dependencies
-        if: startsWith(matrix.platform, 'ubuntu')
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
@@ -57,14 +70,25 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Tauri app
-        run: pnpm tauri build
+        run: pnpm tauri build ${{ matrix.build_args }}
         env:
           GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
 
+      - name: Build Arch package
+        if: matrix.container
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          cp src-tauri/target/release/bundle/deb/*.deb packaging/arch/email.deb
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch/PKGBUILD
+          useradd -m builder
+          chown -R builder packaging/arch
+          cd packaging/arch
+          runuser -u builder -- makepkg --noconfirm
+
       - uses: actions/upload-artifact@v7
         with:
-          name: email-${{ matrix.platform }}
+          name: email-${{ matrix.artifact || matrix.platform }}
           path: ${{ matrix.bundles }}
           if-no-files-found: error
 

@@ -1,0 +1,20 @@
+# Maintainer: Emil Jansson
+# Repackages the Tauri-built deb into a pacman package.
+# CI copies the deb here as email.deb and pins pkgver before running makepkg.
+pkgname=email
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Email client built with Tauri"
+arch=('x86_64')
+url="https://github.com/emmut/email"
+license=('custom')
+depends=('webkit2gtk-4.1' 'gtk3' 'openssl')
+options=('!strip' '!debug')
+source=("${pkgname}.deb")
+noextract=("${pkgname}.deb")
+sha256sums=('SKIP')
+
+package() {
+  bsdtar -xf "${srcdir}/${pkgname}.deb" -C "${srcdir}"
+  bsdtar -xf "${srcdir}"/data.tar.* -C "${pkgdir}"
+}
