@@ -97,7 +97,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: ${{ matrix.release_files }}
-          draft: true
+          draft: false
           fail_on_unmatched_files: true
           body: |
             ## macOS install
