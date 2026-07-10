@@ -81,17 +81,50 @@ export function icloudFoldersQuery(accountId: string) {
   });
 }
 
+// Sync-then-read: an incremental IMAP pass (new UIDs, flag refresh, vanished
+// detection) updates SQLite, then the list is served from SQLite. If the sync
+// fails but the cache has content, the cached list is shown (offline mode).
 export function icloudMessagesQuery(accountId: string, folder: string, limit?: number) {
   return queryOptions({
     queryKey: ["icloud", accountId, "messages", folder, limit],
+    queryFn: async (): Promise<IcloudMessageSummary[]> => {
+      let syncError: unknown = null;
+      try {
+        await invoke("cache_sync_icloud", {
+          account_id: accountId,
+          folder,
+          limit: limit ?? 50,
+        });
+      } catch (e) {
+        syncError = e;
+      }
+      const messages = await invoke<IcloudMessageSummary[]>(
+        "icloud_cached_messages",
+        { account_id: accountId, folder, limit: limit ?? 50 },
+      );
+      if (syncError !== null && messages.length === 0) {
+        throw syncError instanceof Error ? syncError : new Error(String(syncError));
+      }
+      return messages;
+    },
+    enabled: !!accountId && !!folder,
+    staleTime: 30_000,
+  });
+}
+
+// Cache-only listing — instant, no network. Used to paint the list while the
+// syncing query above is still in flight.
+export function icloudLocalMessagesQuery(accountId: string, folder: string, limit?: number) {
+  return queryOptions({
+    queryKey: ["icloud", accountId, "messages", folder, limit, "local"],
     queryFn: () =>
-      invoke<IcloudMessageSummary[]>("icloud_list_messages", {
+      invoke<IcloudMessageSummary[]>("icloud_cached_messages", {
         account_id: accountId,
         folder,
         limit: limit ?? 50,
       }),
     enabled: !!accountId && !!folder,
-    staleTime: 30_000,
+    staleTime: Infinity,
   });
 }
 

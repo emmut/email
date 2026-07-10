@@ -2,9 +2,32 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Utc;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
+
+const MESSAGE_COLUMNS: &str = "uid, message_id, from_name, from_email, \"to\", cc, subject,
+     snippet, body_text, body_html, date, flags, read";
+
+fn row_to_message(row: &Row<'_>) -> rusqlite::Result<CachedMessage> {
+    let flags_json: String = row.get(11)?;
+    let flags: Vec<String> = serde_json::from_str(&flags_json).unwrap_or_default();
+    Ok(CachedMessage {
+        uid: row.get(0)?,
+        message_id: row.get(1)?,
+        from_name: row.get(2)?,
+        from_email: row.get(3)?,
+        to: row.get(4)?,
+        cc: row.get(5)?,
+        subject: row.get(6)?,
+        snippet: row.get(7)?,
+        body_text: row.get(8)?,
+        body_html: row.get(9)?,
+        date: row.get(10)?,
+        flags,
+        read: row.get(12)?,
+    })
+}
 
 const CACHE_DB_NAME: &str = "mail_cache.db";
 
@@ -30,6 +53,20 @@ impl CacheDb {
     }
 
     fn init_tables(conn: &Connection) -> Result<(), String> {
+        // Cache contents are disposable — on schema changes, drop and rebuild.
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        if version < 1 {
+            conn.execute_batch(
+                r#"
+                DROP TABLE IF EXISTS cached_messages;
+                DROP TABLE IF EXISTS sync_state;
+                PRAGMA user_version = 1;
+                "#,
+            )
+            .map_err(|e| e.to_string())?;
+        }
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS cached_messages (
@@ -40,6 +77,7 @@ impl CacheDb {
                 from_name TEXT,
                 from_email TEXT NOT NULL,
                 "to" TEXT NOT NULL,
+                cc TEXT,
                 subject TEXT NOT NULL,
                 snippet TEXT NOT NULL DEFAULT '',
                 body_text TEXT NOT NULL DEFAULT '',
@@ -62,6 +100,13 @@ impl CacheDb {
                 last_synced_at TEXT NOT NULL,
                 PRIMARY KEY (account_id, folder)
             );
+
+            -- Generic JSON cache (Gmail lists/bodies), keyed by opaque strings.
+            CREATE TABLE IF NOT EXISTS cache_kv (
+                key TEXT PRIMARY KEY,
+                json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             "#,
         )
         .map_err(|e| e.to_string())?;
@@ -79,9 +124,9 @@ impl CacheDb {
         let mut stmt = conn
             .prepare(
                 "INSERT OR REPLACE INTO cached_messages
-                 (account_id, uid, folder, message_id, from_name, from_email, \"to\",
+                 (account_id, uid, folder, message_id, from_name, from_email, \"to\", cc,
                   subject, snippet, body_text, body_html, date, flags, read, fetched_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             )
             .map_err(|e| e.to_string())?;
 
@@ -95,6 +140,7 @@ impl CacheDb {
                 msg.from_name,
                 msg.from_email,
                 msg.to,
+                msg.cc,
                 msg.subject,
                 msg.snippet,
                 msg.body_text,
@@ -117,36 +163,17 @@ impl CacheDb {
     ) -> Result<Vec<CachedMessage>, String> {
         let conn = self.conn.lock().await;
         let mut stmt = conn
-            .prepare(
-                "SELECT uid, message_id, from_name, from_email, \"to\", subject,
-                        snippet, body_text, body_html, date, flags, read
+            .prepare(&format!(
+                "SELECT {MESSAGE_COLUMNS}
                  FROM cached_messages
                  WHERE account_id = ?1 AND folder = ?2
-                 ORDER BY date DESC
-                 LIMIT ?3",
-            )
+                 ORDER BY date DESC, uid DESC
+                 LIMIT ?3"
+            ))
             .map_err(|e| e.to_string())?;
 
         let messages = stmt
-            .query_map(params![account_id, folder, limit as i64], |row| {
-                let flags_json: String = row.get(10)?;
-                let flags: Vec<String> =
-                    serde_json::from_str(&flags_json).unwrap_or_default();
-                Ok(CachedMessage {
-                    uid: row.get(0)?,
-                    message_id: row.get(1)?,
-                    from_name: row.get(2)?,
-                    from_email: row.get(3)?,
-                    to: row.get(4)?,
-                    subject: row.get(5)?,
-                    snippet: row.get(6)?,
-                    body_text: row.get(7)?,
-                    body_html: row.get(8)?,
-                    date: row.get(9)?,
-                    flags,
-                    read: row.get(11)?,
-                })
-            })
+            .query_map(params![account_id, folder, limit as i64], row_to_message)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
@@ -162,40 +189,112 @@ impl CacheDb {
     ) -> Result<Option<CachedMessage>, String> {
         let conn = self.conn.lock().await;
         let mut stmt = conn
-            .prepare(
-                "SELECT uid, message_id, from_name, from_email, \"to\", subject,
-                        snippet, body_text, body_html, date, flags, read
+            .prepare(&format!(
+                "SELECT {MESSAGE_COLUMNS}
                  FROM cached_messages
-                 WHERE account_id = ?1 AND folder = ?2 AND uid = ?3",
-            )
+                 WHERE account_id = ?1 AND folder = ?2 AND uid = ?3"
+            ))
             .map_err(|e| e.to_string())?;
 
         let mut rows = stmt
-            .query_map(params![account_id, folder, uid], |row| {
-                let flags_json: String = row.get(10)?;
-                let flags: Vec<String> =
-                    serde_json::from_str(&flags_json).unwrap_or_default();
-                Ok(CachedMessage {
-                    uid: row.get(0)?,
-                    message_id: row.get(1)?,
-                    from_name: row.get(2)?,
-                    from_email: row.get(3)?,
-                    to: row.get(4)?,
-                    subject: row.get(5)?,
-                    snippet: row.get(6)?,
-                    body_text: row.get(7)?,
-                    body_html: row.get(8)?,
-                    date: row.get(9)?,
-                    flags,
-                    read: row.get(11)?,
-                })
-            })
+            .query_map(params![account_id, folder, uid], row_to_message)
             .map_err(|e| e.to_string())?;
 
         match rows.next() {
             Some(row) => Ok(Some(row.map_err(|e| e.to_string())?)),
             None => Ok(None),
         }
+    }
+
+    /// All cached UIDs for a folder — the set the incremental sync verifies
+    /// (flag refresh + vanished-message detection).
+    pub async fn list_uids(&self, account_id: &str, folder: &str) -> Result<Vec<u32>, String> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare("SELECT uid FROM cached_messages WHERE account_id = ?1 AND folder = ?2")
+            .map_err(|e| e.to_string())?;
+        let uids = stmt
+            .query_map(params![account_id, folder], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<u32>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(uids)
+    }
+
+    pub async fn update_flags(
+        &self,
+        account_id: &str,
+        folder: &str,
+        uid: u32,
+        flags: &[String],
+        read: bool,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        let flags_json = serde_json::to_string(flags).unwrap_or_default();
+        conn.execute(
+            "UPDATE cached_messages SET flags = ?4, read = ?3
+             WHERE account_id = ?1 AND folder = ?2 AND uid = ?5",
+            params![account_id, folder, read, flags_json, uid],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn delete_messages(
+        &self,
+        account_id: &str,
+        folder: &str,
+        uids: &[u32],
+    ) -> Result<(), String> {
+        if uids.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().await;
+        let list = uids
+            .iter()
+            .map(|u| u.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        conn.execute(
+            &format!(
+                "DELETE FROM cached_messages
+                 WHERE account_id = ?1 AND folder = ?2 AND uid IN ({list})"
+            ),
+            params![account_id, folder],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn get_kv(&self, key: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().await;
+        conn.query_row(
+            "SELECT json FROM cache_kv WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+    }
+
+    pub async fn put_kv(&self, key: &str, json: &str) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT OR REPLACE INTO cache_kv (key, json, updated_at) VALUES (?1, ?2, ?3)",
+            params![key, json, Utc::now().to_rfc3339()],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn delete_kv_prefix(&self, prefix: &str) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM cache_kv WHERE key LIKE ?1 || '%'",
+            params![prefix],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     pub async fn update_sync_state(
@@ -283,6 +382,7 @@ pub struct CachedMessage {
     pub from_name: Option<String>,
     pub from_email: String,
     pub to: String,
+    pub cc: Option<String>,
     pub subject: String,
     pub snippet: String,
     pub body_text: String,

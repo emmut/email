@@ -30,12 +30,18 @@ import { ShortcutsHelp } from "@/components/mail/shortcuts-help";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
 import { useMailActions } from "@/hooks/use-mail-actions";
 import {
+  gmailCachedListQuery,
   mailListQuery,
   tagIdFromFolder,
   tagsQuery,
   useGmailSync,
 } from "@/lib/gmail";
-import { icloudFolderName, icloudMessagesQuery, toMail } from "@/lib/icloud";
+import {
+  icloudFolderName,
+  icloudLocalMessagesQuery,
+  icloudMessagesQuery,
+  toMail,
+} from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
 
 export function Mail() {
@@ -62,12 +68,25 @@ export function Mail() {
 
   const gmailList = mailListQuery(activeFolder, debouncedSearch);
   const gmailQuery = useQuery({ ...gmailList, enabled: !isIcloud });
+  // Cached copy of the folder painted while the network listing loads.
+  const gmailLocal = useQuery({
+    ...gmailCachedListQuery(activeFolder),
+    enabled: !isIcloud && !debouncedSearch,
+  });
   const icloudList = icloudMessagesQuery(
     activeAccount?.id ?? "",
     icloudFolderName(activeFolder),
   );
   const icloudQuery = useQuery({
     ...icloudList,
+    enabled: isIcloud,
+    select: (msgs) => msgs.map(toMail),
+  });
+  const icloudLocal = useQuery({
+    ...icloudLocalMessagesQuery(
+      activeAccount?.id ?? "",
+      icloudFolderName(activeFolder),
+    ),
     enabled: isIcloud,
     select: (msgs) => msgs.map(toMail),
   });
@@ -80,12 +99,19 @@ export function Mail() {
       s.toLowerCase().includes(q),
     );
   };
-  const mails = isIcloud
-    ? icloudQuery.data?.filter(matchesSearch)
-    : gmailQuery.data;
-  const { isPending, isError, error, refetch } = isIcloud
-    ? icloudQuery
-    : gmailQuery;
+  const networkQuery = isIcloud ? icloudQuery : gmailQuery;
+  const localData = isIcloud
+    ? icloudLocal.data
+    : debouncedSearch
+      ? undefined
+      : (gmailLocal.data ?? undefined);
+  // Cache is a fallback, not truth: only stand in while the network query has
+  // nothing, and only if it actually holds messages.
+  const listData = networkQuery.data ?? (localData?.length ? localData : undefined);
+  const mails = isIcloud ? listData?.filter(matchesSearch) : listData;
+  const isPending = networkQuery.isPending && listData === undefined;
+  const isError = networkQuery.isError && listData === undefined;
+  const { error, refetch } = networkQuery;
 
   // Shared optimistic mail actions (provider-aware: Gmail or iCloud).
   const { act } = useMailActions();
@@ -196,7 +222,7 @@ export function Mail() {
               ) : isError ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm">
                   <p className="text-muted-foreground">
-                    Failed to load mail: {error.message}
+                    Failed to load mail: {error?.message}
                   </p>
                   <Button variant="outline" size="sm" onClick={() => refetch()}>
                     Retry

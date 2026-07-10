@@ -743,14 +743,61 @@ pub async fn icloud_list_messages(
 #[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_fetch_message(
     state: State<'_, AccountState>,
+    cache: State<'_, crate::db::CacheDb>,
     account_id: String,
     folder: String,
     uid: u32,
 ) -> Result<IcloudMessageDetail, String> {
+    // Bodies are immutable — serve from cache when we have one.
+    if let Ok(Some(m)) = cache.get_message(&account_id, &folder, uid).await {
+        if !m.body_text.is_empty() || m.body_html.is_some() {
+            return Ok(IcloudMessageDetail {
+                uid,
+                message_id: m.message_id.unwrap_or_default(),
+                from_name: m.from_name,
+                from_email: m.from_email,
+                to: m.to,
+                cc: m.cc,
+                subject: m.subject,
+                body_text: m.body_text,
+                body_html: m.body_html,
+                date: m.date,
+                flags: m.flags,
+                folder,
+            });
+        }
+    }
+
     let config = get_icloud_config(&state, &account_id).await?;
-    tauri::async_runtime::spawn_blocking(move || fetch_message_blocking(&config, &folder, uid))
-        .await
-        .map_err(|e| e.to_string())?
+    let folder_clone = folder.clone();
+    let detail = tauri::async_runtime::spawn_blocking(move || {
+        fetch_message_blocking(&config, &folder_clone, uid)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    // Write back: offline reading, instant reopen, and a real list snippet.
+    let cached = crate::db::CachedMessage {
+        uid,
+        message_id: Some(detail.message_id.clone()).filter(|s| !s.is_empty()),
+        from_name: detail.from_name.clone(),
+        from_email: detail.from_email.clone(),
+        to: detail.to.clone(),
+        cc: detail.cc.clone(),
+        subject: detail.subject.clone(),
+        snippet: snippet_of(&detail.body_text),
+        body_text: detail.body_text.clone(),
+        body_html: detail.body_html.clone(),
+        date: detail.date.clone(),
+        flags: detail.flags.clone(),
+        read: detail
+            .flags
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case("\\Seen")),
+    };
+    let _ = cache.upsert_messages(&account_id, &folder, &[cached]).await;
+
+    Ok(detail)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -778,33 +825,42 @@ pub async fn icloud_send_message(
 #[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_mark_read(
     state: State<'_, AccountState>,
+    cache: State<'_, crate::db::CacheDb>,
     account_id: String,
     folder: String,
     uid: u32,
     read: bool,
 ) -> Result<(), String> {
     let config = get_icloud_config(&state, &account_id).await?;
+    let folder_clone = folder.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        mark_read_blocking(&config, &folder, uid, read)
+        mark_read_blocking(&config, &folder_clone, uid, read)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+    // Keep the local cache in step so the state survives a restart.
+    let _ = cache.mark_read(&account_id, &folder, uid, read).await;
+    Ok(())
 }
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_move_message(
     state: State<'_, AccountState>,
+    cache: State<'_, crate::db::CacheDb>,
     account_id: String,
     folder: String,
     uid: u32,
     target_folder: String,
 ) -> Result<(), String> {
     let config = get_icloud_config(&state, &account_id).await?;
+    let folder_clone = folder.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        move_message_blocking(&config, &folder, uid, &target_folder)
+        move_message_blocking(&config, &folder_clone, uid, &target_folder)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+    let _ = cache.delete_messages(&account_id, &folder, &[uid]).await;
+    Ok(())
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -897,43 +953,10 @@ fn list_messages_blocking(
         .fetch(&set, "(UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
         .map_err(|e| format!("fetch failed: {e}"))?;
 
-    let mut messages = Vec::new();
-    for fetch in fetches.iter() {
-        let uid = fetch.uid.unwrap_or(0);
-        let envelope = fetch.envelope();
-        let (from_name, from_email) = parse_address(envelope.and_then(|e| e.from.as_ref()).and_then(|v| v.first()));
-        let to = envelope
-            .and_then(|e| e.to.as_ref())
-            .map(|v| v.iter().map(address_to_string).collect::<Vec<_>>().join(", "))
-            .unwrap_or_default();
-        let subject = envelope
-            .and_then(|e| e.subject)
-            .map(|s| String::from_utf8_lossy(s).into_owned())
-            .unwrap_or_else(|| "(no subject)".to_string());
-        let message_id = envelope
-            .and_then(|e| e.message_id)
-            .map(|s| String::from_utf8_lossy(s).into_owned());
-        let date = envelope.and_then(|e| e.date).map(|s| String::from_utf8_lossy(s).into_owned());
-
-        // Snippet from the header we fetched (fallback to empty).
-        let snippet = String::new();
-        let flags: Vec<String> = fetch.flags().iter().map(|x| x.to_string()).collect();
-        let read = flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen"));
-
-        messages.push(IcloudMessageSummary {
-            uid,
-            message_id,
-            from_name,
-            from_email,
-            to,
-            subject,
-            snippet,
-            date,
-            flags,
-            folder: folder.to_string(),
-            read,
-        });
-    }
+    let mut messages: Vec<IcloudMessageSummary> = fetches
+        .iter()
+        .map(|f| summary_from_fetch(f, folder))
+        .collect();
 
     // Newest first.
     messages.reverse();
@@ -941,12 +964,22 @@ fn list_messages_blocking(
     Ok(messages)
 }
 
+/// What one incremental sync pass found, all in a single IMAP session:
+/// envelopes for new UIDs, current flags for already-cached UIDs, and cached
+/// UIDs no longer on the server (deleted or moved elsewhere).
+struct IcloudSyncDelta {
+    new_messages: Vec<IcloudMessageSummary>,
+    flag_updates: Vec<(u32, Vec<String>, bool)>,
+    vanished: Vec<u32>,
+}
+
 fn sync_messages_blocking(
     config: &IcloudAccountConfig,
     folder: &str,
     limit: usize,
     last_uid: Option<u32>,
-) -> Result<Vec<IcloudMessageSummary>, String> {
+    known_uids: &[u32],
+) -> Result<IcloudSyncDelta, String> {
     let mut session = connect_imap(config)?;
     session
         .select(folder)
@@ -966,65 +999,61 @@ fn sync_messages_blocking(
         .into_iter()
         .filter(|u| last_uid.is_none_or(|last| *u > last))
         .collect();
-    if uids.is_empty() {
-        let _ = session.logout();
-        return Ok(Vec::new());
-    }
-
     uids.sort();
-    let total = uids.len();
-    let start = total.saturating_sub(limit);
+    let start = uids.len().saturating_sub(limit);
     let slice = &uids[start..];
-    let set: String = slice
-        .iter()
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
 
-    let fetches = session
-        .uid_fetch(&set, "(UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
-        .map_err(|e| format!("uid fetch failed: {e}"))?;
-
-    let mut messages = Vec::new();
-    for fetch in fetches.iter() {
-        let uid = fetch.uid.unwrap_or(0);
-        let envelope = fetch.envelope();
-        let (from_name, from_email) = parse_address(envelope.and_then(|e| e.from.as_ref()).and_then(|v| v.first()));
-        let to = envelope
-            .and_then(|e| e.to.as_ref())
-            .map(|v| v.iter().map(address_to_string).collect::<Vec<_>>().join(", "))
-            .unwrap_or_default();
-        let subject = envelope
-            .and_then(|e| e.subject)
-            .map(|s| String::from_utf8_lossy(s).into_owned())
-            .unwrap_or_else(|| "(no subject)".to_string());
-        let message_id = envelope
-            .and_then(|e| e.message_id)
-            .map(|s| String::from_utf8_lossy(s).into_owned());
-        let date = envelope.and_then(|e| e.date).map(|s| String::from_utf8_lossy(s).into_owned());
-
-        let snippet = String::new();
-        let flags: Vec<String> = fetch.flags().iter().map(|x| x.to_string()).collect();
-        let read = flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen"));
-
-        messages.push(IcloudMessageSummary {
-            uid,
-            message_id,
-            from_name,
-            from_email,
-            to,
-            subject,
-            snippet,
-            date,
-            flags,
-            folder: folder.to_string(),
-            read,
-        });
+    let mut new_messages = Vec::new();
+    if !slice.is_empty() {
+        let set: String = slice
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let fetches = session
+            .uid_fetch(&set, "(UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
+            .map_err(|e| format!("uid fetch failed: {e}"))?;
+        new_messages = fetches
+            .iter()
+            .map(|f| summary_from_fetch(f, folder))
+            .collect();
+        new_messages.reverse();
     }
 
-    messages.reverse();
+    // Refresh flags for what we already have cached (read state can change
+    // from other devices) and detect messages that vanished from the folder.
+    let mut flag_updates = Vec::new();
+    let mut vanished = Vec::new();
+    if !known_uids.is_empty() {
+        let set: String = known_uids
+            .iter()
+            .map(|u| u.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let fetches = session
+            .uid_fetch(&set, "(UID FLAGS)")
+            .map_err(|e| format!("flags fetch failed: {e}"))?;
+        let mut present = std::collections::HashSet::new();
+        for fetch in fetches.iter() {
+            let Some(uid) = fetch.uid else { continue };
+            present.insert(uid);
+            let flags: Vec<String> = fetch.flags().iter().map(|x| x.to_string()).collect();
+            let read = flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen"));
+            flag_updates.push((uid, flags, read));
+        }
+        vanished = known_uids
+            .iter()
+            .filter(|u| !present.contains(u))
+            .copied()
+            .collect();
+    }
+
     let _ = session.logout();
-    Ok(messages)
+    Ok(IcloudSyncDelta {
+        new_messages,
+        flag_updates,
+        vanished,
+    })
 }
 
 fn fetch_message_blocking(
@@ -1063,7 +1092,11 @@ fn fetch_message_blocking(
         .and_then(|e| e.message_id)
         .map(|s| String::from_utf8_lossy(s).into_owned())
         .unwrap_or_default();
-    let date = envelope.and_then(|e| e.date).map(|s| String::from_utf8_lossy(s).into_owned());
+    let date = normalize_date(
+        envelope
+            .and_then(|e| e.date)
+            .map(|s| String::from_utf8_lossy(s).into_owned()),
+    );
     let flags: Vec<String> = fetch.flags().iter().map(|x| x.to_string()).collect();
 
     let (body_text, body_html) = match fetch.body() {
@@ -1250,6 +1283,63 @@ fn smtp_send_blocking(
 
 // --- helpers ---
 
+/// Envelope dates are RFC 2822; normalize to RFC 3339 so SQLite's
+/// `ORDER BY date DESC` and JS `new Date()` both behave.
+fn normalize_date(raw: Option<String>) -> Option<String> {
+    raw.map(|s| {
+        // Strip trailing "(CEST)"-style comments parse_from_rfc2822 rejects.
+        let trimmed = s.split(" (").next().unwrap_or(&s).trim();
+        DateTime::parse_from_rfc2822(trimmed)
+            .map(|d| d.with_timezone(&Utc).to_rfc3339())
+            .unwrap_or(s.clone())
+    })
+}
+
+/// List-preview snippet from a plain-text body.
+fn snippet_of(text: &str) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed.chars().take(200).collect()
+}
+
+fn summary_from_fetch(fetch: &imap::types::Fetch, folder: &str) -> IcloudMessageSummary {
+    let uid = fetch.uid.unwrap_or(0);
+    let envelope = fetch.envelope();
+    let (from_name, from_email) =
+        parse_address(envelope.and_then(|e| e.from.as_ref()).and_then(|v| v.first()));
+    let to = envelope
+        .and_then(|e| e.to.as_ref())
+        .map(|v| v.iter().map(address_to_string).collect::<Vec<_>>().join(", "))
+        .unwrap_or_default();
+    let subject = envelope
+        .and_then(|e| e.subject)
+        .map(|s| String::from_utf8_lossy(s).into_owned())
+        .unwrap_or_else(|| "(no subject)".to_string());
+    let message_id = envelope
+        .and_then(|e| e.message_id)
+        .map(|s| String::from_utf8_lossy(s).into_owned());
+    let date = normalize_date(
+        envelope
+            .and_then(|e| e.date)
+            .map(|s| String::from_utf8_lossy(s).into_owned()),
+    );
+    let flags: Vec<String> = fetch.flags().iter().map(|x| x.to_string()).collect();
+    let read = flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen"));
+
+    IcloudMessageSummary {
+        uid,
+        message_id,
+        from_name,
+        from_email,
+        to,
+        subject,
+        snippet: String::new(),
+        date,
+        flags,
+        folder: folder.to_string(),
+        read,
+    }
+}
+
 fn address_to_string(addr: &imap_proto::Address) -> String {
     let mailbox = addr.mailbox.map(|b| String::from_utf8_lossy(b)).unwrap_or_default();
     let host = addr.host.map(|b| String::from_utf8_lossy(b)).unwrap_or_default();
@@ -1350,21 +1440,21 @@ pub async fn cache_sync_icloud(
     let config = get_icloud_config(&state, &account_id).await?;
     let limit = limit.unwrap_or(50) as usize;
 
-    // Get last synced UID for incremental sync
     let last_uid = cache
         .get_sync_state(&account_id, &folder)
-        .await
-        .map_err(|e| e.to_string())?
+        .await?
         .map(|s| s.last_uid);
+    let known_uids = cache.list_uids(&account_id, &folder).await?;
 
     let folder_clone = folder.clone();
-    let messages = tauri::async_runtime::spawn_blocking(move || {
-        sync_messages_blocking(&config, &folder_clone, limit, last_uid)
+    let delta = tauri::async_runtime::spawn_blocking(move || {
+        sync_messages_blocking(&config, &folder_clone, limit, last_uid, &known_uids)
     })
     .await
     .map_err(|e| e.to_string())??;
 
-    let cached: Vec<crate::db::CachedMessage> = messages
+    let cached: Vec<crate::db::CachedMessage> = delta
+        .new_messages
         .into_iter()
         .map(|m| crate::db::CachedMessage {
             uid: m.uid,
@@ -1372,6 +1462,7 @@ pub async fn cache_sync_icloud(
             from_name: m.from_name,
             from_email: m.from_email,
             to: m.to,
+            cc: None,
             subject: m.subject,
             snippet: m.snippet,
             body_text: String::new(),
@@ -1383,12 +1474,78 @@ pub async fn cache_sync_icloud(
         .collect();
 
     let count = cached.len() as u32;
-    if let Some(max_uid) = cached.iter().map(|m| m.uid).max() {
+    if !cached.is_empty() {
         cache.upsert_messages(&account_id, &folder, &cached).await?;
-        cache.update_sync_state(&account_id, &folder, max_uid).await?;
+    }
+    for (uid, flags, read) in delta.flag_updates {
+        cache
+            .update_flags(&account_id, &folder, uid, &flags, read)
+            .await?;
+    }
+    cache
+        .delete_messages(&account_id, &folder, &delta.vanished)
+        .await?;
+    if let Some(max_uid) = cached.iter().map(|m| m.uid).max() {
+        if max_uid > last_uid.unwrap_or(0) {
+            cache.update_sync_state(&account_id, &folder, max_uid).await?;
+        }
     }
 
     Ok(count)
+}
+
+/// Read the cached folder listing (no network) as summaries the UI renders.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn icloud_cached_messages(
+    cache: State<'_, crate::db::CacheDb>,
+    account_id: String,
+    folder: String,
+    limit: Option<u32>,
+) -> Result<Vec<IcloudMessageSummary>, String> {
+    let messages = cache
+        .list_messages(&account_id, &folder, limit.unwrap_or(50) as usize)
+        .await?;
+    Ok(messages
+        .into_iter()
+        .map(|m| IcloudMessageSummary {
+            uid: m.uid,
+            message_id: m.message_id,
+            from_name: m.from_name,
+            from_email: m.from_email,
+            to: m.to,
+            subject: m.subject,
+            snippet: m.snippet,
+            date: m.date,
+            flags: m.flags,
+            folder: folder.clone(),
+            read: m.read,
+        })
+        .collect())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn cache_get_json(
+    cache: State<'_, crate::db::CacheDb>,
+    key: String,
+) -> Result<Option<String>, String> {
+    cache.get_kv(&key).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn cache_put_json(
+    cache: State<'_, crate::db::CacheDb>,
+    key: String,
+    json: String,
+) -> Result<(), String> {
+    cache.put_kv(&key, &json).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn cache_delete_prefix(
+    cache: State<'_, crate::db::CacheDb>,
+    prefix: String,
+) -> Result<(), String> {
+    cache.delete_kv_prefix(&prefix).await
 }
 
 #[tauri::command(rename_all = "snake_case")]

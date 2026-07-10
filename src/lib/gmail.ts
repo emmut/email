@@ -1,9 +1,33 @@
 import { useEffect, useRef } from "react";
 import DOMPurify from "dompurify";
+import { invoke } from "@tauri-apps/api/core";
 import { fetch } from "@tauri-apps/plugin-http";
 import { queryOptions, useQueryClient } from "@tanstack/react-query";
 import { getAccessToken } from "@/lib/auth";
 import type { Mail } from "@/components/mail/data";
+
+// --- local persistent cache (SQLite key-value, via the Rust backend) ---
+//
+// Lists and bodies are cached as JSON so the UI paints instantly on startup
+// and bodies read offline. Cache failures are never surfaced — the network
+// path is always authoritative.
+
+async function cacheGet<T>(key: string): Promise<T | null> {
+  try {
+    const json = await invoke<string | null>("cache_get_json", { key });
+    return json ? (JSON.parse(json) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function cachePut(key: string, value: unknown) {
+  invoke("cache_put_json", { key, json: JSON.stringify(value) }).catch(() => {});
+}
+
+export function clearGmailCache() {
+  return invoke("cache_delete_prefix", { prefix: "gmail:" }).catch(() => {});
+}
 
 const BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 const PEOPLE_BASE = "https://people.googleapis.com/v1";
@@ -295,21 +319,36 @@ export function mailListQuery(folder: string, search: string) {
       const list = await gmail<{ messages?: MessageRef[] }>(
         `/messages?maxResults=50&${params}`,
       );
-      if (!list.messages?.length) return [];
-      const [names, messages] = await Promise.all([
-        labelNames(),
-        Promise.all(
-          list.messages.map((m) =>
-            gmail<Message>(
-              `/messages/${m.id}?format=metadata` +
-                `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+      let result: Mail[] = [];
+      if (list.messages?.length) {
+        const [names, messages] = await Promise.all([
+          labelNames(),
+          Promise.all(
+            list.messages.map((m) =>
+              gmail<Message>(
+                `/messages/${m.id}?format=metadata` +
+                  `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+              ),
             ),
           ),
-        ),
-      ]);
-      return messages.map((m) => toMail(m, names));
+        ]);
+        result = messages.map((m) => toMail(m, names));
+      }
+      // Persist plain folder listings (not ad-hoc searches) for instant startup.
+      if (!search) cachePut(`gmail:list:${folder}`, result);
+      return result;
     },
     staleTime: 30_000,
+  });
+}
+
+// Cache-only folder listing (null on cache miss) — painted while the network
+// listing above is in flight.
+export function gmailCachedListQuery(folder: string) {
+  return queryOptions({
+    queryKey: ["gmail", "list", folder, "@cache"],
+    queryFn: () => cacheGet<Mail[]>(`gmail:list:${folder}`),
+    staleTime: Infinity,
   });
 }
 
@@ -317,9 +356,12 @@ export function mailBodyQuery(id: string) {
   return queryOptions({
     queryKey: ["gmail", "message", id],
     queryFn: async (): Promise<MailBody> => {
+      // Bodies are immutable — serve from the local cache when present.
+      const cached = await cacheGet<MailBody>(`gmail:body:${id}`);
+      if (cached) return cached;
       const msg = await gmail<Message>(`/messages/${id}?format=full`);
       const from = header(msg, "From");
-      return {
+      const body: MailBody = {
         ...extractBody(msg.payload),
         threadId: msg.threadId,
         subject: header(msg, "Subject"),
@@ -331,6 +373,8 @@ export function mailBodyQuery(id: string) {
         references: header(msg, "References"),
         date: header(msg, "Date"),
       };
+      cachePut(`gmail:body:${id}`, body);
+      return body;
     },
     staleTime: Infinity,
   });

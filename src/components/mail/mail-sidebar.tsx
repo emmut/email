@@ -69,6 +69,7 @@ import { useAccount } from "@/context/AccountContext";
 import { cn, isMac } from "@/lib/utils";
 import {
   avatarQuery,
+  clearGmailCache,
   createTag,
   deleteTag,
   folderCountsQuery,
@@ -155,11 +156,15 @@ export function MailSidebar({
           accounts.filter((a) => a.kind === "google").length === 1;
         await removeAccount(activeAccount.id);
         // The legacy keychain token belongs to the first Google account —
-        // clear it when the last Google account goes away.
-        if (lastGoogle) await invoke("sign_out");
+        // clear it (and the local Gmail cache) when the last one goes away.
+        if (lastGoogle) {
+          await invoke("sign_out");
+          await clearGmailCache();
+        }
       } else {
         // Legacy Google sign-in with no account row.
         await invoke("sign_out");
+        await clearGmailCache();
       }
     },
     onSuccess: () => {
