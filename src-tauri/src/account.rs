@@ -62,6 +62,7 @@ pub struct GoogleAccountConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IcloudAccountConfig {
+    pub email: String,
     pub app_password: String,
     pub imap_server: String,
     pub imap_port: u16,
@@ -157,7 +158,6 @@ fn delete_secret(account_id: &str) -> Result<(), String> {
 
 pub struct AccountState {
     pub db: Arc<tokio::sync::Mutex<Connection>>,
-    pub google_auth: AuthState,
 }
 
 impl AccountState {
@@ -165,7 +165,6 @@ impl AccountState {
         let conn = get_conn(app)?;
         Ok(Self {
             db: Arc::new(tokio::sync::Mutex::new(conn)),
-            google_auth: AuthState::default(),
         })
     }
 }
@@ -281,6 +280,7 @@ pub async fn list_accounts(state: State<'_, AccountState>) -> Result<Vec<Account
 pub async fn add_google_account(
     app: AppHandle,
     state: State<'_, AccountState>,
+    auth: State<'_, AuthState>,
     display_name: Option<String>,
 ) -> Result<Account, String> {
     // Start Google OAuth flow
@@ -392,7 +392,7 @@ pub async fn add_google_account(
 
     // If this is the first account, also initialize the Google AuthState for backward compat
     if is_first {
-        let mut inner = state.google_auth.0.lock().await;
+        let mut inner = auth.0.lock().await;
         inner.refresh = Some(refresh.to_string());
         inner.keychain_loaded = true;
         oauth::cache_token(&mut inner, &tokens);
@@ -437,6 +437,7 @@ pub async fn add_icloud_account(
     };
 
     let config = AccountConfig::Icloud(IcloudAccountConfig {
+        email: email.clone(),
         app_password: app_password.clone(),
         imap_server: imap_server.clone(),
         imap_port,
@@ -812,7 +813,7 @@ fn connect_imap(config: &IcloudAccountConfig) -> Result<ImapSession, String> {
     )
     .map_err(|e| format!("IMAP connect failed: {e}"))?;
     let session = client
-        .login(&config.app_password, &config.app_password)
+        .login(&config.email, &config.app_password)
         .map_err(|e| format!("IMAP login failed: {e:?}"))?;
     Ok(session)
 }

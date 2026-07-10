@@ -17,6 +17,7 @@ export interface GoogleAccountConfig {
 }
 
 export interface IcloudAccountConfig {
+  email: string;
   app_password: string;
   imap_server: string;
   imap_port: number;

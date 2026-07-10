@@ -9,6 +9,8 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .setup(|app| {
             use tauri::Manager;
+            let auth_state = oauth::AuthState::default();
+            app.manage(auth_state);
             let account_state = account::AccountState::new(app.handle())?;
             app.manage(account_state);
             let cache_db = db::CacheDb::new(app.handle())?;
