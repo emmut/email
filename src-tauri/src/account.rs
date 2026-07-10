@@ -754,6 +754,7 @@ pub struct IcloudMessageDetail {
     pub from_email: String,
     pub to: String,
     pub cc: Option<String>,
+    pub references: Option<String>,
     pub subject: String,
     pub body_text: String,
     pub body_html: Option<String>,
@@ -804,6 +805,7 @@ pub async fn icloud_fetch_message(
                 from_email: m.from_email,
                 to: m.to,
                 cc: m.cc,
+                references: m.references,
                 subject: m.subject,
                 body_text: m.body_text,
                 body_html: m.body_html,
@@ -834,6 +836,7 @@ pub async fn icloud_fetch_message(
         from_email: detail.from_email.clone(),
         to: detail.to.clone(),
         cc: detail.cc.clone(),
+        references: detail.references.clone(),
         subject: detail.subject.clone(),
         snippet: snippet_of(&detail.body_text),
         body_text: detail.body_text.clone(),
@@ -1228,6 +1231,15 @@ fn fetch_message_blocking(
         Some(raw) => parse_body(raw),
         None => (String::new(), None),
     };
+    // References isn't in the ENVELOPE — pull it from the raw headers so
+    // replies thread correctly beyond the immediate parent.
+    let references = fetch.body().and_then(|raw| {
+        use mailparse::MailHeaderMap;
+        mailparse::parse_mail(raw)
+            .ok()
+            .and_then(|m| m.headers.get_first_value("References"))
+            .filter(|s| !s.trim().is_empty())
+    });
 
     Ok(IcloudMessageDetail {
         uid,
@@ -1236,6 +1248,7 @@ fn fetch_message_blocking(
         from_email,
         to,
         cc,
+        references,
         subject,
         body_text,
         body_html,
@@ -1593,6 +1606,7 @@ pub async fn cache_sync_icloud(
                 from_email: m.from_email,
                 to: m.to,
                 cc: None,
+                references: None,
                 subject: m.subject,
                 snippet: snippet_of(&body_text),
                 body_text,

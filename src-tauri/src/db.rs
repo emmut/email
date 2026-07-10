@@ -6,11 +6,11 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-const MESSAGE_COLUMNS: &str = "uid, message_id, from_name, from_email, \"to\", cc, subject,
+const MESSAGE_COLUMNS: &str = "uid, message_id, from_name, from_email, \"to\", cc, refs, subject,
      snippet, body_text, body_html, date, flags, read";
 
 fn row_to_message(row: &Row<'_>) -> rusqlite::Result<CachedMessage> {
-    let flags_json: String = row.get(11)?;
+    let flags_json: String = row.get(12)?;
     let flags: Vec<String> = serde_json::from_str(&flags_json).unwrap_or_default();
     Ok(CachedMessage {
         uid: row.get(0)?,
@@ -19,13 +19,14 @@ fn row_to_message(row: &Row<'_>) -> rusqlite::Result<CachedMessage> {
         from_email: row.get(3)?,
         to: row.get(4)?,
         cc: row.get(5)?,
-        subject: row.get(6)?,
-        snippet: row.get(7)?,
-        body_text: row.get(8)?,
-        body_html: row.get(9)?,
-        date: row.get(10)?,
+        references: row.get(6)?,
+        subject: row.get(7)?,
+        snippet: row.get(8)?,
+        body_text: row.get(9)?,
+        body_html: row.get(10)?,
+        date: row.get(11)?,
         flags,
-        read: row.get(12)?,
+        read: row.get(13)?,
     })
 }
 
@@ -62,12 +63,12 @@ impl CacheDb {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(|e| e.to_string())?;
-        if version < 1 {
+        if version < 2 {
             conn.execute_batch(
                 r#"
                 DROP TABLE IF EXISTS cached_messages;
                 DROP TABLE IF EXISTS sync_state;
-                PRAGMA user_version = 1;
+                PRAGMA user_version = 2;
                 "#,
             )
             .map_err(|e| e.to_string())?;
@@ -83,6 +84,7 @@ impl CacheDb {
                 from_email TEXT NOT NULL,
                 "to" TEXT NOT NULL,
                 cc TEXT,
+                refs TEXT,
                 subject TEXT NOT NULL,
                 snippet TEXT NOT NULL DEFAULT '',
                 body_text TEXT NOT NULL DEFAULT '',
@@ -139,9 +141,9 @@ impl CacheDb {
         let mut stmt = conn
             .prepare(
                 "INSERT OR REPLACE INTO cached_messages
-                 (account_id, uid, folder, message_id, from_name, from_email, \"to\", cc,
+                 (account_id, uid, folder, message_id, from_name, from_email, \"to\", cc, refs,
                   subject, snippet, body_text, body_html, date, flags, read, fetched_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             )
             .map_err(|e| e.to_string())?;
 
@@ -156,6 +158,7 @@ impl CacheDb {
                 msg.from_email,
                 msg.to,
                 msg.cc,
+                msg.references,
                 msg.subject,
                 msg.snippet,
                 msg.body_text,
@@ -448,6 +451,7 @@ pub struct CachedMessage {
     pub from_email: String,
     pub to: String,
     pub cc: Option<String>,
+    pub references: Option<String>,
     pub subject: String,
     pub snippet: String,
     pub body_text: String,

@@ -57,6 +57,7 @@ export interface IcloudMessageDetail {
   from_email: string;
   to: string;
   cc: string | null;
+  references: string | null;
   subject: string;
   body_text: string;
   body_html: string | null;
@@ -162,7 +163,7 @@ export function icloudMessageBodyQuery(accountId: string, folder: string, uid: n
         to: detail.to,
         cc: detail.cc ?? "",
         messageId: detail.message_id,
-        references: "",
+        references: detail.references ?? "",
         date: detail.date ?? "",
       };
     },

@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { Archive, Reply, ReplyAll, Trash2 } from "lucide-react";
+import {
+  Archive,
+  MailOpen,
+  MailX,
+  Reply,
+  ReplyAll,
+  Trash2,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -187,6 +194,25 @@ export function MailDisplay({
           </TooltipTrigger>
           <TooltipContent>
             Move to trash <Kbd>#</Kbd>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={isPending}
+              onClick={() => act(mail.read ? "unread" : "read", mail.id)}
+            >
+              {mail.read ? (
+                <MailX className="size-4" />
+              ) : (
+                <MailOpen className="size-4" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {mail.read ? "Mark as unread" : "Mark as read"}
           </TooltipContent>
         </Tooltip>
         <AlertDialog open={confirmTrash} onOpenChange={setConfirmTrash}>
