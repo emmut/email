@@ -1,7 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import type { Mail } from "@/components/mail/data";
+import { useAccount } from "@/context/AccountContext";
 import {
+  applyGmailActionToCache,
+  applyGmailLabelChange,
   archiveMessage,
   markRead,
   markUnread,
@@ -10,6 +13,18 @@ import {
   trashMessage,
   type Tag,
 } from "@/lib/gmail";
+import {
+  ICLOUD_FOLDER_NAMES,
+  icloudMarkRead,
+  icloudMoveMessage,
+  parseIcloudMailId,
+  type IcloudMessageSummary,
+} from "@/lib/icloud";
+import {
+  isNetworkError,
+  queueGmailAction,
+  queueIcloudAction,
+} from "@/lib/offline";
 
 export type MailAction = "archive" | "trash" | "read" | "unread";
 
@@ -35,21 +50,97 @@ function countDelta(action: MailAction, folder: string, read: boolean): number {
 // and reconcile with the server in the background on success.
 export function useMailActions(onRemoved?: (id: string) => void) {
   const queryClient = useQueryClient();
+  const { activeAccount } = useAccount();
 
   const mutation = useMutation({
-    mutationFn: ({ action, id }: { action: MailAction; id: string }) => {
-      switch (action) {
-        case "archive":
-          return archiveMessage(id);
-        case "trash":
-          return trashMessage(id);
-        case "read":
-          return markRead(id);
-        case "unread":
-          return markUnread(id);
+    mutationFn: async ({ action, id }: { action: MailAction; id: string }) => {
+      const ref = parseIcloudMailId(id);
+      if (ref && activeAccount) {
+        try {
+          switch (action) {
+            case "archive":
+              await icloudMoveMessage(
+                activeAccount.id,
+                ref.folder,
+                ref.uid,
+                ICLOUD_FOLDER_NAMES.archive,
+              );
+              return;
+            case "trash":
+              await icloudMoveMessage(
+                activeAccount.id,
+                ref.folder,
+                ref.uid,
+                ICLOUD_FOLDER_NAMES.trash,
+              );
+              return;
+            case "read":
+            case "unread":
+              await icloudMarkRead(
+                activeAccount.id,
+                ref.folder,
+                ref.uid,
+                action === "read",
+              );
+              return;
+          }
+        } catch (err) {
+          // Offline: journal the action (also updates the SQLite cache) and
+          // keep the optimistic UI — it replays when connectivity returns.
+          if (!isNetworkError(err)) throw err;
+          await queueIcloudAction(activeAccount.id, ref.folder, ref.uid, action);
+          return;
+        }
+      }
+      try {
+        switch (action) {
+          case "archive":
+            await archiveMessage(id);
+            return;
+          case "trash":
+            await trashMessage(id);
+            return;
+          case "read":
+            await markRead(id);
+            return;
+          case "unread":
+            await markUnread(id);
+            return;
+        }
+      } catch (err) {
+        if (!isNetworkError(err)) throw err;
+        await queueGmailAction(id, action);
       }
     },
     onMutate: async ({ action, id }) => {
+      const ref = parseIcloudMailId(id);
+      if (ref && activeAccount) {
+        const listKey = ["icloud", activeAccount.id, "messages"];
+        await queryClient.cancelQueries({ queryKey: listKey });
+        const icloudPrevious = queryClient.getQueriesData<
+          IcloudMessageSummary[]
+        >({ queryKey: listKey });
+        queryClient.setQueriesData<IcloudMessageSummary[]>(
+          { queryKey: listKey },
+          (old) =>
+            action === "read" || action === "unread"
+              ? old?.map((m) =>
+                  m.uid === ref.uid && m.folder === ref.folder
+                    ? { ...m, read: action === "read" }
+                    : m,
+                )
+              : old?.filter(
+                  (m) => !(m.uid === ref.uid && m.folder === ref.folder),
+                ),
+        );
+        if (action === "archive" || action === "trash") onRemoved?.(id);
+        return {
+          previous: undefined,
+          previousCounts: undefined,
+          icloudPrevious,
+        };
+      }
+
       await queryClient.cancelQueries({ queryKey: ["gmail", "list"] });
       await queryClient.cancelQueries({ queryKey: ["gmail", "counts"] });
       const previous = queryClient.getQueriesData<Mail[]>({
@@ -98,17 +189,38 @@ export function useMailActions(onRemoved?: (id: string) => void) {
       }
 
       if (action === "archive" || action === "trash") onRemoved?.(id);
-      return { previous, previousCounts };
+      // Mirror the change into the local message store right away — durable
+      // across restarts whether the server call succeeds now or replays later.
+      void applyGmailActionToCache(id, action);
+      return { previous, previousCounts, icloudPrevious: undefined };
     },
     onError: (_err, _vars, context) => {
       context?.previous?.forEach(([key, data]) =>
+        queryClient.setQueryData(key, data),
+      );
+      context?.icloudPrevious?.forEach(([key, data]) =>
         queryClient.setQueryData(key, data),
       );
       if (context?.previousCounts) {
         queryClient.setQueryData(["gmail", "counts"], context.previousCounts);
       }
     },
-    onSuccess: (_data, { action }) => {
+    onSuccess: (_data, { action, id }) => {
+      // Keep the pending-ops indicator fresh (the action may have queued).
+      queryClient.invalidateQueries({ queryKey: ["ops"] });
+      const ref = parseIcloudMailId(id);
+      if (ref && activeAccount) {
+        queryClient.invalidateQueries({
+          queryKey: ["icloud", activeAccount.id, "counts"],
+        });
+        // Reconcile the destination folder's list in the background.
+        if (action === "archive" || action === "trash") {
+          queryClient.invalidateQueries({
+            queryKey: ["icloud", activeAccount.id, "messages"],
+          });
+        }
+        return;
+      }
       queryClient.invalidateQueries({ queryKey: ["gmail", "counts"] });
       // Reconcile other folders (archive/trash destinations) in the background;
       // read/unread already left every list cache correct.
@@ -150,6 +262,7 @@ export function useTagActions() {
     mutationFn: ({ id, tag, on }: { id: string; tag: Tag; on: boolean }) =>
       setMessageTag(id, tag.id, on),
     onMutate: async ({ id, tag, on }) => {
+      void applyGmailLabelChange(id, on ? [tag.id] : [], on ? [] : [tag.id]);
       await queryClient.cancelQueries({ queryKey: ["gmail", "list"] });
       const previous = queryClient.getQueriesData<Mail[]>({
         queryKey: ["gmail", "list"],

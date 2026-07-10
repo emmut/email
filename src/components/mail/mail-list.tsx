@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import type { Mail } from "@/components/mail/data";
 import { tagsQuery } from "@/lib/gmail";
 import { useMailActions, useTagActions } from "@/hooks/use-mail-actions";
+import { useAccount } from "@/context/AccountContext";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
@@ -57,7 +58,10 @@ export function MailList({
   const [trashTarget, setTrashTarget] = useState<Mail | null>(null);
   const { act } = useMailActions();
   const { toggle: toggleTag } = useTagActions();
-  const { data: tags } = useQuery(tagsQuery);
+  const { activeAccount } = useAccount();
+  const isIcloud = activeAccount?.kind === "icloud";
+  // Tags are a Gmail feature.
+  const { data: tags } = useQuery({ ...tagsQuery, enabled: !isIcloud });
 
   return (
     <ScrollArea className="h-full">
@@ -169,8 +173,8 @@ export function MailList({
           <AlertDialogHeader>
             <AlertDialogTitle>Move to trash?</AlertDialogTitle>
             <AlertDialogDescription>
-              “{trashTarget?.subject}” moves to Trash. Gmail deletes trashed
-              mail permanently after 30 days.
+              “{trashTarget?.subject}” moves to Trash. Trashed mail is deleted
+              permanently after 30 days.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

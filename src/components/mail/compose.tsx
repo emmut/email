@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,17 +10,32 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RecipientInput } from "@/components/mail/recipient-input";
+import { useAccount } from "@/context/AccountContext";
 import {
   contactsQuery,
   sendMessage,
-  signatureQuery,
   tagsQuery,
+  type Contact,
   type OutgoingMail,
 } from "@/lib/gmail";
+import { useSignature } from "@/lib/signature";
+import { icloudContactsQuery, icloudSendMessage } from "@/lib/icloud";
+import {
+  isNetworkError,
+  queueGmailSend,
+  queueIcloudSend,
+  useOnline,
+} from "@/lib/offline";
 
 export interface ComposeDraft {
   to?: string;
@@ -81,25 +96,23 @@ function ComposeForm({
   onClose: () => void;
 }) {
   // The editor takes its content at mount, so wait for the signature first.
-  const signature = useQuery(signatureQuery);
+  // Resolved per account: local signature, Gmail-hosted fallback (Google).
+  const { activeAccount } = useAccount();
+  const { signature, isPending } = useSignature(activeAccount);
 
   return (
     <DialogContent className="sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle>{draft.inReplyTo ? "Reply" : "New message"}</DialogTitle>
       </DialogHeader>
-      {signature.isPending ? (
+      {isPending ? (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-8 w-full" />
           <Skeleton className="h-8 w-full" />
           <Skeleton className="h-44 w-full" />
         </div>
       ) : (
-        <ComposeFields
-          draft={draft}
-          signature={signature.data ?? ""}
-          onClose={onClose}
-        />
+        <ComposeFields draft={draft} signature={signature} onClose={onClose} />
       )}
     </DialogContent>
   );
@@ -114,38 +127,121 @@ function ComposeFields({
   signature: string;
   onClose: () => void;
 }) {
+  const { accounts, activeAccountId } = useAccount();
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(activeAccountId);
   const [to, setTo] = useState(draft.to ?? "");
   const [cc, setCc] = useState(draft.cc ?? "");
   const [bcc, setBcc] = useState("");
   const [subject, setSubject] = useState(draft.subject ?? "");
   const [tagIds, setTagIds] = useState<string[]>([]);
 
-  const { data: tags } = useQuery(tagsQuery);
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+  const selectedIsIcloud = selectedAccount?.kind === "icloud";
+
+  // Tags and contact autocomplete are Gmail features.
+  const { data: tags } = useQuery({ ...tagsQuery, enabled: !selectedIsIcloud });
 
   const toggleTag = (id: string) =>
     setTagIds((prev) =>
       prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id],
     );
 
-  const initialHtml =
+  const buildHtml = (sig: string) =>
     "<p></p>" +
-    (signature ? `<p></p><p>--</p>${tidySignature(signature)}` : "") +
+    (sig ? `<p></p><p>--</p>${tidySignature(sig)}` : "") +
     (draft.bodyHtml ?? "");
-  const [body, setBody] = useState(() => ({ html: initialHtml, text: "" }));
+  const [body, setBody] = useState(() => ({
+    html: buildHtml(signature),
+    text: "",
+  }));
 
-  const { data: contacts, isError: contactsFailed, error: contactsError } =
-    useQuery(contactsQuery);
+  // The signature follows the From account. When it changes and the user
+  // hasn't typed yet, rebuild the editor content with the new account's
+  // signature (a bumped key remounts the editor). Once the user has typed we
+  // leave the content alone rather than clobber it.
+  const edited = useRef(false);
+  const [editorKey, setEditorKey] = useState(0);
+  const [currentSig, setCurrentSig] = useState(signature);
+  const selectedSig = useSignature(selectedAccount);
+  useEffect(() => {
+    if (selectedSig.isPending || edited.current) return;
+    if (selectedSig.signature === currentSig) return;
+    setCurrentSig(selectedSig.signature);
+    setBody({ html: buildHtml(selectedSig.signature), text: "" });
+    setEditorKey((k) => k + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSig.signature, selectedSig.isPending]);
+
+  // Contacts from every connected source, deduped by address (a contact in
+  // both keeps the named/Google entry). The list itself shows the origin.
+  const hasGoogle = accounts.length === 0 || accounts.some((a) => a.kind === "google");
+  const hasIcloud = accounts.some((a) => a.kind === "icloud");
+  const googleContacts = useQuery({ ...contactsQuery, enabled: hasGoogle });
+  const icloudContacts = useQuery({ ...icloudContactsQuery, enabled: hasIcloud });
+  const contactsFailed = hasGoogle && googleContacts.isError;
+  const contactsError = googleContacts.error;
+  const contacts = useMemo(() => {
+    const byEmail = new Map<string, Contact>();
+    for (const c of [
+      ...(googleContacts.data ?? []),
+      ...(icloudContacts.data ?? []),
+    ]) {
+      const key = c.email.toLowerCase();
+      const existing = byEmail.get(key);
+      if (!existing || (!existing.name && c.name)) byEmail.set(key, c);
+    }
+    return [...byEmail.values()];
+  }, [googleContacts.data, icloudContacts.data]);
 
   const queryClient = useQueryClient();
   const sendMutation = useMutation({
-    mutationFn: (msg: OutgoingMail) => sendMessage(msg),
+    mutationFn: async (msg: OutgoingMail) => {
+      const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+      if (selectedAccount?.kind === "icloud") {
+        // Send via iCloud SMTP
+        const params = {
+          accountId: selectedAccount.id,
+          fromEmail: selectedAccount.email,
+          to: msg.to,
+          cc: msg.cc,
+          bcc: msg.bcc,
+          subject: msg.subject,
+          bodyText: msg.body,
+          bodyHtml: msg.html,
+          inReplyTo: msg.inReplyTo,
+          references: msg.references,
+        };
+        try {
+          await icloudSendMessage(params);
+        } catch (err) {
+          // Offline: park it in the outbox; it sends when connectivity returns.
+          if (!isNetworkError(err)) throw err;
+          await queueIcloudSend(params);
+        }
+      } else {
+        // Send via Gmail API (default)
+        try {
+          await sendMessage(msg);
+        } catch (err) {
+          if (!isNetworkError(err)) throw err;
+          await queueGmailSend(msg);
+        }
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
+      queryClient.invalidateQueries({ queryKey: ["icloud"] });
+      queryClient.invalidateQueries({ queryKey: ["ops"] });
       onClose();
     },
   });
 
+  const online = useOnline();
   const isReply = Boolean(draft.inReplyTo);
+
+  const fromLabel = selectedAccount
+    ? `${selectedAccount.kind === "google" ? "Google" : "iCloud"}: ${selectedAccount.email}`
+    : "Select account";
 
   return (
     <form
@@ -159,6 +255,7 @@ function ComposeFields({
       }}
       onSubmit={(e) => {
         e.preventDefault();
+        if (!selectedAccountId) return;
         sendMutation.mutate({
           to,
           cc: cc.trim() || undefined,
@@ -173,6 +270,30 @@ function ComposeFields({
         });
       }}
     >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" type="button" className="justify-start">
+            <span className="text-muted-foreground">From:</span>
+            <span className="truncate">{fromLabel}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-80">
+          {accounts.map((acc) => (
+            <DropdownMenuItem
+              key={acc.id}
+              onSelect={() => setSelectedAccountId(acc.id)}
+              className={acc.id === selectedAccountId ? "bg-accent font-medium" : ""}
+            >
+              <span className="flex items-center gap-2 w-full">
+                <span className="text-xs uppercase text-muted-foreground">
+                  {acc.kind === "google" ? "Google" : "iCloud"}
+                </span>
+                <span className="truncate">{acc.email}</span>
+              </span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
       <RecipientInput
         placeholder="To"
         required
@@ -195,7 +316,7 @@ function ComposeFields({
       />
       {contactsFailed && (
         <p className="text-muted-foreground text-xs">
-          Contact autocomplete unavailable: {contactsError.message}
+          Contact autocomplete unavailable: {contactsError?.message}
         </p>
       )}
       <Input
@@ -205,11 +326,15 @@ function ComposeFields({
         onChange={(e) => setSubject(e.target.value)}
       />
       <RichTextEditor
-        initialHtml={initialHtml}
+        key={editorKey}
+        initialHtml={body.html}
         autoFocus={isReply}
-        onChange={(html, text) => setBody({ html, text })}
+        onChange={(html, text) => {
+          edited.current = true;
+          setBody({ html, text });
+        }}
       />
-      {tags?.length ? (
+      {!selectedIsIcloud && tags?.length ? (
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-muted-foreground text-xs">Tags:</span>
           {tags.map((tag) => (
@@ -226,13 +351,18 @@ function ComposeFields({
         </div>
       ) : null}
       <DialogFooter className="items-center gap-3">
-        {sendMutation.isError && (
+        {sendMutation.isError ? (
           <span className="text-destructive mr-auto text-xs">
             Send failed: {sendMutation.error.message}
           </span>
-        )}
+        ) : !online ? (
+          <span className="text-muted-foreground mr-auto text-xs">
+            You’re offline — the message will be queued and sent when the
+            connection returns.
+          </span>
+        ) : null}
         <Button type="submit" disabled={sendMutation.isPending}>
-          {sendMutation.isPending ? "Sending…" : "Send"}
+          {sendMutation.isPending ? "Sending…" : online ? "Send" : "Queue"}
         </Button>
       </DialogFooter>
     </form>

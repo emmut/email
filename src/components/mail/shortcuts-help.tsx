@@ -8,6 +8,7 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { isMac } from "@/lib/utils";
 
 const SHORTCUTS: { keys: string[]; label: string }[] = [
+  { keys: [isMac ? "⌘" : "Ctrl", "P"], label: "Command palette" },
   { keys: ["c"], label: "Compose" },
   { keys: ["r"], label: "Reply" },
   { keys: ["a"], label: "Reply all" },

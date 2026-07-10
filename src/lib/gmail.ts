@@ -1,9 +1,26 @@
 import { useEffect, useRef } from "react";
 import DOMPurify from "dompurify";
+import { invoke } from "@tauri-apps/api/core";
 import { fetch } from "@tauri-apps/plugin-http";
 import { queryOptions, useQueryClient } from "@tanstack/react-query";
 import { getAccessToken } from "@/lib/auth";
+import { cacheDeletePrefix, cacheGet, cachePut } from "@/lib/cache";
 import type { Mail } from "@/components/mail/data";
+
+// Gmail is single-account today (legacy OAuth token); the local message store
+// is keyed under this id.
+const GMAIL_CACHE_ACCOUNT = "legacy";
+
+export function clearGmailCache() {
+  lastFolderSync.clear();
+  prefetchedBodies.clear();
+  return Promise.all([
+    cacheDeletePrefix("gmail:"),
+    invoke("gmail_cache_clear", { account_id: GMAIL_CACHE_ACCOUNT }).catch(
+      () => {},
+    ),
+  ]);
+}
 
 const BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 const PEOPLE_BASE = "https://people.googleapis.com/v1";
@@ -70,11 +87,47 @@ interface Label {
 
 // --- header / body parsing ---
 
+// The Gmail API returns header values raw, so non-ASCII text arrives as RFC
+// 2047 encoded-words (=?charset?B|Q?data?=); decode them for display.
+function decodeRfc2047(value: string): string {
+  if (!value.includes("=?")) return value;
+  // Whitespace between adjacent encoded words is not part of the text.
+  const joined = value.replace(/(\?=)\s+(?==\?)/g, "$1");
+  return joined.replace(
+    /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,
+    (match, charset: string, enc: string, data: string) => {
+      try {
+        let bytes: Uint8Array;
+        if (enc.toLowerCase() === "b") {
+          bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        } else {
+          const out: number[] = [];
+          const text = data.replace(/_/g, " ");
+          for (let i = 0; i < text.length; i++) {
+            const hex = text.slice(i + 1, i + 3);
+            if (text[i] === "=" && /^[0-9a-f]{2}$/i.test(hex)) {
+              out.push(parseInt(hex, 16));
+              i += 2;
+            } else {
+              out.push(text.charCodeAt(i));
+            }
+          }
+          bytes = new Uint8Array(out);
+        }
+        // Charset may carry an RFC 2231 language tag ("utf-8*en").
+        return new TextDecoder(charset.split("*")[0]).decode(bytes);
+      } catch {
+        return match;
+      }
+    },
+  );
+}
+
 function header(msg: Message, name: string): string {
-  return (
+  return decodeRfc2047(
     msg.payload?.headers?.find(
       (h) => h.name.toLowerCase() === name.toLowerCase(),
-    )?.value ?? ""
+    )?.value ?? "",
   );
 }
 
@@ -276,62 +329,254 @@ const FOLDER_PARAMS: Record<string, string> = {
   archive: `q=${encodeURIComponent("-in:inbox -in:sent -in:drafts -in:spam -in:trash")}`,
 };
 
+function folderParams(folder: string): string {
+  const tagId = tagIdFromFolder(folder);
+  return tagId
+    ? `labelIds=${encodeURIComponent(tagId)}`
+    : (FOLDER_PARAMS[folder] ?? FOLDER_PARAMS.inbox);
+}
+
+async function fetchMailsFromNetwork(params: string): Promise<Mail[]> {
+  const list = await gmail<{ messages?: MessageRef[] }>(
+    `/messages?maxResults=50&${params}`,
+  );
+  if (!list.messages?.length) return [];
+  const [names, messages] = await Promise.all([
+    labelNames(),
+    Promise.all(
+      list.messages.map((m) =>
+        gmail<Message>(
+          `/messages/${m.id}?format=metadata` +
+            `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+        ),
+      ),
+    ),
+  ]);
+  return messages.map((m) => toMail(m, names));
+}
+
+// --- local message store: SQLite is the read path, the network fills it ---
+
+interface GmailCachedMessage {
+  id: string;
+  thread_id: string | null;
+  name: string;
+  email: string;
+  subject: string;
+  snippet: string;
+  date: string;
+  read: boolean;
+  label_ids: string[];
+}
+
+// App folder id → the label defining it (null = Archive: no folder label).
+function folderLabelId(folder: string): string | null {
+  const tagId = tagIdFromFolder(folder);
+  if (tagId) return tagId;
+  const map: Record<string, string | null> = {
+    inbox: "INBOX",
+    drafts: "DRAFT",
+    sent: "SENT",
+    junk: "SPAM",
+    trash: "TRASH",
+    archive: null,
+  };
+  return folder in map ? map[folder] : "INBOX";
+}
+
+function mailToRow(m: Mail): GmailCachedMessage {
+  return {
+    id: m.id,
+    thread_id: null,
+    name: m.name,
+    email: m.email,
+    subject: m.subject,
+    snippet: m.text,
+    date: m.date,
+    read: m.read,
+    label_ids: m.labelIds,
+  };
+}
+
+async function rowsToMails(rows: GmailCachedMessage[]): Promise<Mail[]> {
+  const isUserLabel = (id: string) =>
+    !SYSTEM_LABELS.has(id) && !id.startsWith("CATEGORY_");
+  // Badge names need the label map; offline it may be unavailable — fall back
+  // to raw ids rather than failing the listing.
+  const names = rows.some((r) => r.label_ids.some(isUserLabel))
+    ? await labelNames().catch(() => new Map<string, string>())
+    : new Map<string, string>();
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    subject: r.subject,
+    text: r.snippet,
+    date: r.date,
+    read: r.read,
+    labelIds: r.label_ids,
+    labels: r.label_ids
+      .filter(isUserLabel)
+      .map((id) => (names.get(id) ?? id).toLowerCase()),
+  }));
+}
+
+async function readGmailFolder(folder: string): Promise<Mail[]> {
+  const rows = await invoke<GmailCachedMessage[]>("gmail_cache_list", {
+    account_id: GMAIL_CACHE_ACCOUNT,
+    label_id: folderLabelId(folder),
+    limit: 50,
+  });
+  return rowsToMails(rows);
+}
+
+// Full folder syncs are expensive (1 list + 50 metadata requests). Between
+// them the history delta keeps the local store fresh, so invalidation-driven
+// refetches are pure SQLite reads.
+const FULL_SYNC_INTERVAL = 5 * 60_000;
+const lastFolderSync = new Map<string, number>();
+
+async function syncGmailFolder(folder: string): Promise<void> {
+  const mails = await fetchMailsFromNetwork(folderParams(folder));
+  await invoke("gmail_cache_replace_folder", {
+    account_id: GMAIL_CACHE_ACCOUNT,
+    label_id: folderLabelId(folder),
+    messages: mails.map(mailToRow),
+  });
+  lastFolderSync.set(folder, Date.now());
+  // Fire-and-forget: warm the body cache for the newest messages so they're
+  // readable offline without ever having been opened.
+  void prefetchBodies(mails.slice(0, 10));
+}
+
+// Called when the historyId reseeds (expired/invalid) — the deltas we missed
+// are unknown, so folders must fully resync on next view.
+function invalidateFolderSyncState() {
+  lastFolderSync.clear();
+}
+
+// Label ops mirroring the server-side mail actions, applied to the local
+// store immediately (online or offline) so the state survives a restart.
+const ACTION_LABEL_OPS: Record<string, { add: string[]; remove: string[] }> = {
+  read: { add: [], remove: ["UNREAD"] },
+  unread: { add: ["UNREAD"], remove: [] },
+  archive: { add: [], remove: ["INBOX"] },
+  trash: { add: ["TRASH"], remove: ["INBOX"] },
+};
+
+export function applyGmailLabelChange(
+  id: string,
+  add: string[],
+  remove: string[],
+) {
+  return invoke("gmail_cache_modify_labels", {
+    account_id: GMAIL_CACHE_ACCOUNT,
+    message_id: id,
+    add,
+    remove,
+  }).catch(() => {});
+}
+
+export function applyGmailActionToCache(
+  id: string,
+  action: "read" | "unread" | "archive" | "trash",
+) {
+  const ops = ACTION_LABEL_OPS[action];
+  return applyGmailLabelChange(id, ops.add, ops.remove);
+}
+
 export function mailListQuery(folder: string, search: string) {
   return queryOptions({
     queryKey: ["gmail", "list", folder, search],
     queryFn: async (): Promise<Mail[]> => {
-      const tagId = tagIdFromFolder(folder);
-      let params = tagId
-        ? `labelIds=${encodeURIComponent(tagId)}`
-        : (FOLDER_PARAMS[folder] ?? FOLDER_PARAMS.inbox);
+      // Ad-hoc searches go straight to the server, uncached.
       if (search) {
+        let params = folderParams(folder);
         const q = params.startsWith("q=")
           ? `${decodeURIComponent(params.slice(2))} ${search}`
           : search;
         params = params.startsWith("q=")
           ? `q=${encodeURIComponent(q)}`
           : `${params}&q=${encodeURIComponent(q)}`;
+        return fetchMailsFromNetwork(params);
       }
-      const list = await gmail<{ messages?: MessageRef[] }>(
-        `/messages?maxResults=50&${params}`,
-      );
-      if (!list.messages?.length) return [];
-      const [names, messages] = await Promise.all([
-        labelNames(),
-        Promise.all(
-          list.messages.map((m) =>
-            gmail<Message>(
-              `/messages/${m.id}?format=metadata` +
-                `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
-            ),
-          ),
-        ),
-      ]);
-      return messages.map((m) => toMail(m, names));
+      // Local-first: full-sync at most every FULL_SYNC_INTERVAL (history
+      // deltas cover the gaps), then serve the listing from SQLite.
+      let syncError: unknown = null;
+      if (Date.now() - (lastFolderSync.get(folder) ?? 0) > FULL_SYNC_INTERVAL) {
+        try {
+          await syncGmailFolder(folder);
+        } catch (err) {
+          syncError = err;
+        }
+      }
+      const mails = await readGmailFolder(folder);
+      if (syncError !== null && mails.length === 0) {
+        throw syncError instanceof Error
+          ? syncError
+          : new Error(String(syncError));
+      }
+      return mails;
     },
     staleTime: 30_000,
   });
 }
 
+// Ids checked once per session — list queries refetch every 30s and the
+// answer for an already-cached body never changes.
+const prefetchedBodies = new Set<string>();
+
+async function prefetchBodies(mails: Mail[]) {
+  for (const mail of mails) {
+    if (prefetchedBodies.has(mail.id)) continue;
+    try {
+      if (!(await cacheGet<MailBody>(`gmail:body:${mail.id}`))) {
+        await fetchMailBody(mail.id); // caches as a side effect
+      }
+      prefetchedBodies.add(mail.id);
+    } catch {
+      return; // network gone — stop quietly
+    }
+  }
+}
+
+// Local-store-only folder listing — instant, no network. Painted while the
+// syncing query above is in flight.
+export function gmailCachedListQuery(folder: string) {
+  return queryOptions({
+    queryKey: ["gmail", "list", folder, "@cache"],
+    queryFn: () => readGmailFolder(folder),
+    staleTime: Infinity,
+  });
+}
+
+// Bodies are immutable — serve from the local cache when present, and cache
+// on first fetch (also used by the list prefetcher).
+async function fetchMailBody(id: string): Promise<MailBody> {
+  const cached = await cacheGet<MailBody>(`gmail:body:${id}`);
+  if (cached) return cached;
+  const msg = await gmail<Message>(`/messages/${id}?format=full`);
+  const from = header(msg, "From");
+  const body: MailBody = {
+    ...extractBody(msg.payload),
+    threadId: msg.threadId,
+    subject: header(msg, "Subject"),
+    from,
+    replyTo: header(msg, "Reply-To") || from,
+    to: header(msg, "To"),
+    cc: header(msg, "Cc"),
+    messageId: header(msg, "Message-ID"),
+    references: header(msg, "References"),
+    date: header(msg, "Date"),
+  };
+  cachePut(`gmail:body:${id}`, body);
+  return body;
+}
+
 export function mailBodyQuery(id: string) {
   return queryOptions({
     queryKey: ["gmail", "message", id],
-    queryFn: async (): Promise<MailBody> => {
-      const msg = await gmail<Message>(`/messages/${id}?format=full`);
-      const from = header(msg, "From");
-      return {
-        ...extractBody(msg.payload),
-        threadId: msg.threadId,
-        subject: header(msg, "Subject"),
-        from,
-        replyTo: header(msg, "Reply-To") || from,
-        to: header(msg, "To"),
-        cc: header(msg, "Cc"),
-        messageId: header(msg, "Message-ID"),
-        references: header(msg, "References"),
-        date: header(msg, "Date"),
-      };
-    },
+    queryFn: () => fetchMailBody(id),
     staleTime: Infinity,
   });
 }
@@ -340,16 +585,25 @@ export function mailBodyQuery(id: string) {
 export const folderCountsQuery = queryOptions({
   queryKey: ["gmail", "counts"],
   queryFn: async (): Promise<Record<string, number>> => {
-    const [inbox, drafts, junk] = await Promise.all([
-      gmail<Label>("/labels/INBOX"),
-      gmail<Label>("/labels/DRAFT"),
-      gmail<Label>("/labels/SPAM"),
-    ]);
-    return {
-      inbox: inbox.messagesUnread ?? 0,
-      drafts: drafts.messagesTotal ?? 0,
-      junk: junk.messagesUnread ?? 0,
-    };
+    try {
+      const [inbox, drafts, junk] = await Promise.all([
+        gmail<Label>("/labels/INBOX"),
+        gmail<Label>("/labels/DRAFT"),
+        gmail<Label>("/labels/SPAM"),
+      ]);
+      const counts = {
+        inbox: inbox.messagesUnread ?? 0,
+        drafts: drafts.messagesTotal ?? 0,
+        junk: junk.messagesUnread ?? 0,
+      };
+      cachePut("gmail:counts", counts);
+      return counts;
+    } catch (err) {
+      // Offline — fall back to the last known counts.
+      const cached = await cacheGet<Record<string, number>>("gmail:counts");
+      if (cached) return cached;
+      throw err;
+    }
   },
   staleTime: 30_000,
 });
@@ -382,6 +636,7 @@ export const signatureQuery = queryOptions({
 export interface Contact {
   name: string;
   email: string;
+  source: "google" | "icloud";
 }
 
 interface Person {
@@ -395,7 +650,7 @@ function toContacts(people: Person[] | undefined): Contact[] {
     return (p.emailAddresses ?? [])
       .map((e) => e.value?.trim())
       .filter((v): v is string => Boolean(v))
-      .map((email) => ({ name, email }));
+      .map((email) => ({ name, email, source: "google" as const }));
   });
 }
 
@@ -491,15 +746,37 @@ function mimePart(type: string, content: string): string {
   );
 }
 
+// CR/LF in a header value would let pasted input inject additional headers
+// (e.g. a hidden Bcc) into the raw RFC 822 message.
+function stripNewlines(value: string): string {
+  return value.replace(/[\r\n]+/g, " ").trim();
+}
+
+// Reply drafts carry decoded display names ("Ann Öberg <a@b>"); re-encode any
+// non-ASCII name so the outgoing To/Cc/Bcc headers stay 7-bit clean.
+function encodeAddressList(raw: string): string {
+  return raw
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      if (/^[\x20-\x7e]*$/.test(part)) return part;
+      const match = part.match(/^"?(.*?)"?\s*(<[^>]+>)$/);
+      if (!match || !match[1]) return part;
+      return `${encodeHeaderValue(match[1])} ${match[2]}`;
+    })
+    .join(", ");
+}
+
 // Build an RFC 822 message and send it. Gmail fills in From/Date/Message-ID.
 export async function sendMessage(msg: OutgoingMail) {
   const headers = [
-    `To: ${msg.to}`,
-    ...(msg.cc ? [`Cc: ${msg.cc}`] : []),
-    ...(msg.bcc ? [`Bcc: ${msg.bcc}`] : []),
-    `Subject: ${encodeHeaderValue(msg.subject)}`,
-    ...(msg.inReplyTo ? [`In-Reply-To: ${msg.inReplyTo}`] : []),
-    ...(msg.references ? [`References: ${msg.references}`] : []),
+    `To: ${encodeAddressList(stripNewlines(msg.to))}`,
+    ...(msg.cc ? [`Cc: ${encodeAddressList(stripNewlines(msg.cc))}`] : []),
+    ...(msg.bcc ? [`Bcc: ${encodeAddressList(stripNewlines(msg.bcc))}`] : []),
+    `Subject: ${encodeHeaderValue(stripNewlines(msg.subject))}`,
+    ...(msg.inReplyTo ? [`In-Reply-To: ${stripNewlines(msg.inReplyTo)}`] : []),
+    ...(msg.references ? [`References: ${stripNewlines(msg.references)}`] : []),
     "MIME-Version: 1.0",
   ];
 
@@ -532,19 +809,87 @@ export async function sendMessage(msg: OutgoingMail) {
 
 // --- historyId delta sync ---
 //
-// Poll history.list with the last seen historyId; on any change, invalidate
-// gmail queries so open views refetch. Far cheaper than re-listing folders.
+// Poll history.list with the last seen historyId and apply the delta to the
+// LOCAL STORE (added messages fetched individually, deletions removed, label
+// changes patched), then invalidate so open views re-read SQLite. Steady
+// state costs one request per poll instead of re-listing whole folders.
+
+interface HistoryMessage {
+  id: string;
+  threadId?: string;
+  labelIds?: string[];
+}
+
+interface HistoryRecord {
+  messagesAdded?: { message: HistoryMessage }[];
+  messagesDeleted?: { message: HistoryMessage }[];
+  labelsAdded?: { message: HistoryMessage; labelIds?: string[] }[];
+  labelsRemoved?: { message: HistoryMessage; labelIds?: string[] }[];
+}
 
 interface HistoryResponse {
   historyId: string;
-  history?: unknown[];
+  history?: HistoryRecord[];
 }
 
-export function useGmailSync(intervalMs = 30_000) {
+async function applyGmailHistory(records: HistoryRecord[]) {
+  const added = new Set<string>();
+  const deleted = new Set<string>();
+  const labelOps: { id: string; add: string[]; remove: string[] }[] = [];
+  for (const rec of records) {
+    for (const a of rec.messagesAdded ?? []) added.add(a.message.id);
+    for (const d of rec.messagesDeleted ?? []) {
+      deleted.add(d.message.id);
+      added.delete(d.message.id);
+    }
+    for (const l of rec.labelsAdded ?? [])
+      labelOps.push({ id: l.message.id, add: l.labelIds ?? [], remove: [] });
+    for (const l of rec.labelsRemoved ?? [])
+      labelOps.push({ id: l.message.id, add: [], remove: l.labelIds ?? [] });
+  }
+
+  const newIds = [...added];
+  if (newIds.length) {
+    const [names, messages] = await Promise.all([
+      labelNames(),
+      Promise.all(
+        newIds.map((id) =>
+          gmail<Message>(
+            `/messages/${id}?format=metadata` +
+              `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+          ).catch(() => null), // may already be gone again
+        ),
+      ),
+    ]);
+    const mails = messages
+      .filter((m): m is Message => m !== null)
+      .map((m) => toMail(m, names));
+    if (mails.length) {
+      await invoke("gmail_cache_upsert", {
+        account_id: GMAIL_CACHE_ACCOUNT,
+        messages: mails.map(mailToRow),
+      });
+      void prefetchBodies(mails);
+    }
+  }
+  if (deleted.size) {
+    await invoke("gmail_cache_delete", {
+      account_id: GMAIL_CACHE_ACCOUNT,
+      ids: [...deleted],
+    });
+  }
+  for (const op of labelOps) {
+    if (deleted.has(op.id) || added.has(op.id)) continue; // already final
+    await applyGmailLabelChange(op.id, op.add, op.remove);
+  }
+}
+
+export function useGmailSync(enabled = true, intervalMs = 30_000) {
   const queryClient = useQueryClient();
   const lastHistoryId = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
 
     const tick = async () => {
@@ -560,13 +905,15 @@ export function useGmailSync(intervalMs = 30_000) {
         if (cancelled) return;
         lastHistoryId.current = delta.historyId;
         if (delta.history?.length) {
+          await applyGmailHistory(delta.history);
           queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
           queryClient.invalidateQueries({ queryKey: ["gmail", "counts"] });
         }
       } catch {
-        // Expired/invalid historyId (Gmail keeps history ~1 week) — reseed
-        // from the profile and refresh everything once.
+        // Expired/invalid historyId (Gmail keeps history ~1 week) — reseed,
+        // force full folder resyncs, and refresh everything once.
         lastHistoryId.current = null;
+        invalidateFolderSyncState();
         queryClient.invalidateQueries({ queryKey: ["gmail"] });
       }
     };
@@ -577,5 +924,5 @@ export function useGmailSync(intervalMs = 30_000) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [queryClient, intervalMs]);
+  }, [queryClient, enabled, intervalMs]);
 }

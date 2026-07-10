@@ -14,41 +14,41 @@ use tauri::async_runtime::Mutex;
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
-const AUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
-const REVOKE_ENDPOINT: &str = "https://oauth2.googleapis.com/revoke";
-const SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/userinfo.profile";
+pub const AUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+pub const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
+pub const REVOKE_ENDPOINT: &str = "https://oauth2.googleapis.com/revoke";
+pub const SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/userinfo.profile";
 const KEYCHAIN_SERVICE: &str = "com.emiljansson.email";
 const KEYCHAIN_USER: &str = "gmail-refresh-token";
 const REDIRECT_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Default)]
-pub struct AuthState(Mutex<Inner>);
+pub struct AuthState(pub Mutex<Inner>);
 
 /// All auth state lives behind one async lock so concurrent `get_access_token`
 /// calls queue up instead of each hitting the keychain or the token endpoint.
 #[derive(Default)]
-struct Inner {
-    access: Option<CachedToken>,
-    refresh: Option<String>,
+pub struct Inner {
+    pub access: Option<CachedToken>,
+    pub refresh: Option<String>,
     /// The keychain is read at most once per app run; afterwards `refresh`
     /// (including `None` when signed out) is authoritative.
-    keychain_loaded: bool,
+    pub keychain_loaded: bool,
 }
 
-struct CachedToken {
+pub(crate) struct CachedToken {
     access_token: String,
     expires_at: Instant,
 }
 
-#[derive(Deserialize)]
-struct TokenResponse {
-    access_token: String,
-    expires_in: u64,
-    refresh_token: Option<String>,
+#[derive(Deserialize, Debug)]
+pub struct TokenResponse {
+    pub access_token: String,
+    pub expires_in: u64,
+    pub refresh_token: Option<String>,
 }
 
-fn client_id() -> Result<String, String> {
+pub fn client_id() -> Result<String, String> {
     std::env::var("GOOGLE_OAUTH_CLIENT_ID")
         .ok()
         .or_else(|| option_env!("GOOGLE_OAUTH_CLIENT_ID").map(String::from))
@@ -61,7 +61,7 @@ fn client_id() -> Result<String, String> {
 
 // Google "Desktop app" clients require the client secret in token requests even
 // with PKCE. It is not treated as confidential for installed apps.
-fn client_secret() -> Option<String> {
+pub fn client_secret() -> Option<String> {
     std::env::var("GOOGLE_OAUTH_CLIENT_SECRET")
         .ok()
         .or_else(|| option_env!("GOOGLE_OAUTH_CLIENT_SECRET").map(String::from))
@@ -71,11 +71,11 @@ fn keychain_entry() -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER).map_err(|e| e.to_string())
 }
 
-fn store_refresh_token(token: &str) -> Result<(), String> {
+pub fn store_refresh_token(token: &str) -> Result<(), String> {
     keychain_entry()?.set_password(token).map_err(|e| e.to_string())
 }
 
-fn load_refresh_token() -> Result<Option<String>, String> {
+pub fn load_refresh_token() -> Result<Option<String>, String> {
     match keychain_entry()?.get_password() {
         Ok(token) => Ok(Some(token)),
         Err(keyring::Error::NoEntry) => Ok(None),
@@ -83,7 +83,7 @@ fn load_refresh_token() -> Result<Option<String>, String> {
     }
 }
 
-fn delete_refresh_token() -> Result<(), String> {
+pub fn delete_refresh_token() -> Result<(), String> {
     match keychain_entry()?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(e.to_string()),
@@ -94,7 +94,7 @@ fn delete_refresh_token() -> Result<(), String> {
 /// macOS ties keychain access to the exact code signature; with ad-hoc signed
 /// builds every rebuild looks like a new app to the item created by the old
 /// one, so without this each launch after an update would prompt again.
-fn reown_refresh_token(token: &str) {
+pub fn reown_refresh_token(token: &str) {
     if delete_refresh_token().is_ok() {
         if let Err(e) = store_refresh_token(token) {
             eprintln!("failed to rewrite refresh token to keychain: {e}");
@@ -124,24 +124,24 @@ async fn refresh_token(inner: &mut Inner) -> Result<Option<String>, String> {
     Ok(inner.refresh.clone())
 }
 
-fn base64url(bytes: &[u8]) -> String {
+pub fn base64url(bytes: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn random_token() -> String {
+pub fn random_token() -> String {
     let mut buf = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut buf);
     base64url(&buf)
 }
 
-fn cache_token(inner: &mut Inner, tokens: &TokenResponse) {
+pub fn cache_token(inner: &mut Inner, tokens: &TokenResponse) {
     inner.access = Some(CachedToken {
         access_token: tokens.access_token.clone(),
         expires_at: Instant::now() + Duration::from_secs(tokens.expires_in.saturating_sub(60)),
     });
 }
 
-async fn exchange(params: &[(&str, &str)]) -> Result<TokenResponse, String> {
+pub async fn exchange(params: &[(&str, &str)]) -> Result<TokenResponse, String> {
     let resp = reqwest::Client::new()
         .post(TOKEN_ENDPOINT)
         .form(params)
