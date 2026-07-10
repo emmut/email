@@ -1,30 +1,25 @@
 import { useEffect, useRef } from "react";
 import DOMPurify from "dompurify";
+import { invoke } from "@tauri-apps/api/core";
 import { fetch } from "@tauri-apps/plugin-http";
-import {
-  queryOptions,
-  useQueryClient,
-  type QueryClient,
-} from "@tanstack/react-query";
+import { queryOptions, useQueryClient } from "@tanstack/react-query";
 import { getAccessToken } from "@/lib/auth";
 import { cacheDeletePrefix, cacheGet, cachePut } from "@/lib/cache";
 import type { Mail } from "@/components/mail/data";
 
-export function clearGmailCache() {
-  return cacheDeletePrefix("gmail:");
-}
+// Gmail is single-account today (legacy OAuth token); the local message store
+// is keyed under this id.
+const GMAIL_CACHE_ACCOUNT = "legacy";
 
-// Write the current in-memory folder listings through to SQLite — used after
-// offline optimistic updates so a restart shows the same state.
-export function persistGmailListCaches(queryClient: QueryClient) {
-  const lists = queryClient.getQueriesData<Mail[]>({
-    queryKey: ["gmail", "list"],
-  });
-  for (const [key, data] of lists) {
-    if (key.length === 4 && key[3] === "" && data) {
-      cachePut(`gmail:list:${key[2] as string}`, data);
-    }
-  }
+export function clearGmailCache() {
+  lastFolderSync.clear();
+  prefetchedBodies.clear();
+  return Promise.all([
+    cacheDeletePrefix("gmail:"),
+    invoke("gmail_cache_clear", { account_id: GMAIL_CACHE_ACCOUNT }).catch(
+      () => {},
+    ),
+  ]);
 }
 
 const BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -298,48 +293,194 @@ const FOLDER_PARAMS: Record<string, string> = {
   archive: `q=${encodeURIComponent("-in:inbox -in:sent -in:drafts -in:spam -in:trash")}`,
 };
 
+function folderParams(folder: string): string {
+  const tagId = tagIdFromFolder(folder);
+  return tagId
+    ? `labelIds=${encodeURIComponent(tagId)}`
+    : (FOLDER_PARAMS[folder] ?? FOLDER_PARAMS.inbox);
+}
+
+async function fetchMailsFromNetwork(params: string): Promise<Mail[]> {
+  const list = await gmail<{ messages?: MessageRef[] }>(
+    `/messages?maxResults=50&${params}`,
+  );
+  if (!list.messages?.length) return [];
+  const [names, messages] = await Promise.all([
+    labelNames(),
+    Promise.all(
+      list.messages.map((m) =>
+        gmail<Message>(
+          `/messages/${m.id}?format=metadata` +
+            `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+        ),
+      ),
+    ),
+  ]);
+  return messages.map((m) => toMail(m, names));
+}
+
+// --- local message store: SQLite is the read path, the network fills it ---
+
+interface GmailCachedMessage {
+  id: string;
+  thread_id: string | null;
+  name: string;
+  email: string;
+  subject: string;
+  snippet: string;
+  date: string;
+  read: boolean;
+  label_ids: string[];
+}
+
+// App folder id → the label defining it (null = Archive: no folder label).
+function folderLabelId(folder: string): string | null {
+  const tagId = tagIdFromFolder(folder);
+  if (tagId) return tagId;
+  const map: Record<string, string | null> = {
+    inbox: "INBOX",
+    drafts: "DRAFT",
+    sent: "SENT",
+    junk: "SPAM",
+    trash: "TRASH",
+    archive: null,
+  };
+  return folder in map ? map[folder] : "INBOX";
+}
+
+function mailToRow(m: Mail): GmailCachedMessage {
+  return {
+    id: m.id,
+    thread_id: null,
+    name: m.name,
+    email: m.email,
+    subject: m.subject,
+    snippet: m.text,
+    date: m.date,
+    read: m.read,
+    label_ids: m.labelIds,
+  };
+}
+
+async function rowsToMails(rows: GmailCachedMessage[]): Promise<Mail[]> {
+  const isUserLabel = (id: string) =>
+    !SYSTEM_LABELS.has(id) && !id.startsWith("CATEGORY_");
+  // Badge names need the label map; offline it may be unavailable — fall back
+  // to raw ids rather than failing the listing.
+  const names = rows.some((r) => r.label_ids.some(isUserLabel))
+    ? await labelNames().catch(() => new Map<string, string>())
+    : new Map<string, string>();
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    subject: r.subject,
+    text: r.snippet,
+    date: r.date,
+    read: r.read,
+    labelIds: r.label_ids,
+    labels: r.label_ids
+      .filter(isUserLabel)
+      .map((id) => (names.get(id) ?? id).toLowerCase()),
+  }));
+}
+
+async function readGmailFolder(folder: string): Promise<Mail[]> {
+  const rows = await invoke<GmailCachedMessage[]>("gmail_cache_list", {
+    account_id: GMAIL_CACHE_ACCOUNT,
+    label_id: folderLabelId(folder),
+    limit: 50,
+  });
+  return rowsToMails(rows);
+}
+
+// Full folder syncs are expensive (1 list + 50 metadata requests). Between
+// them the history delta keeps the local store fresh, so invalidation-driven
+// refetches are pure SQLite reads.
+const FULL_SYNC_INTERVAL = 5 * 60_000;
+const lastFolderSync = new Map<string, number>();
+
+async function syncGmailFolder(folder: string): Promise<void> {
+  const mails = await fetchMailsFromNetwork(folderParams(folder));
+  await invoke("gmail_cache_replace_folder", {
+    account_id: GMAIL_CACHE_ACCOUNT,
+    label_id: folderLabelId(folder),
+    messages: mails.map(mailToRow),
+  });
+  lastFolderSync.set(folder, Date.now());
+  // Fire-and-forget: warm the body cache for the newest messages so they're
+  // readable offline without ever having been opened.
+  void prefetchBodies(mails.slice(0, 10));
+}
+
+// Called when the historyId reseeds (expired/invalid) — the deltas we missed
+// are unknown, so folders must fully resync on next view.
+function invalidateFolderSyncState() {
+  lastFolderSync.clear();
+}
+
+// Label ops mirroring the server-side mail actions, applied to the local
+// store immediately (online or offline) so the state survives a restart.
+const ACTION_LABEL_OPS: Record<string, { add: string[]; remove: string[] }> = {
+  read: { add: [], remove: ["UNREAD"] },
+  unread: { add: ["UNREAD"], remove: [] },
+  archive: { add: [], remove: ["INBOX"] },
+  trash: { add: ["TRASH"], remove: ["INBOX"] },
+};
+
+export function applyGmailLabelChange(
+  id: string,
+  add: string[],
+  remove: string[],
+) {
+  return invoke("gmail_cache_modify_labels", {
+    account_id: GMAIL_CACHE_ACCOUNT,
+    message_id: id,
+    add,
+    remove,
+  }).catch(() => {});
+}
+
+export function applyGmailActionToCache(
+  id: string,
+  action: "read" | "unread" | "archive" | "trash",
+) {
+  const ops = ACTION_LABEL_OPS[action];
+  return applyGmailLabelChange(id, ops.add, ops.remove);
+}
+
 export function mailListQuery(folder: string, search: string) {
   return queryOptions({
     queryKey: ["gmail", "list", folder, search],
     queryFn: async (): Promise<Mail[]> => {
-      const tagId = tagIdFromFolder(folder);
-      let params = tagId
-        ? `labelIds=${encodeURIComponent(tagId)}`
-        : (FOLDER_PARAMS[folder] ?? FOLDER_PARAMS.inbox);
+      // Ad-hoc searches go straight to the server, uncached.
       if (search) {
+        let params = folderParams(folder);
         const q = params.startsWith("q=")
           ? `${decodeURIComponent(params.slice(2))} ${search}`
           : search;
         params = params.startsWith("q=")
           ? `q=${encodeURIComponent(q)}`
           : `${params}&q=${encodeURIComponent(q)}`;
+        return fetchMailsFromNetwork(params);
       }
-      const list = await gmail<{ messages?: MessageRef[] }>(
-        `/messages?maxResults=50&${params}`,
-      );
-      let result: Mail[] = [];
-      if (list.messages?.length) {
-        const [names, messages] = await Promise.all([
-          labelNames(),
-          Promise.all(
-            list.messages.map((m) =>
-              gmail<Message>(
-                `/messages/${m.id}?format=metadata` +
-                  `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
-              ),
-            ),
-          ),
-        ]);
-        result = messages.map((m) => toMail(m, names));
+      // Local-first: full-sync at most every FULL_SYNC_INTERVAL (history
+      // deltas cover the gaps), then serve the listing from SQLite.
+      let syncError: unknown = null;
+      if (Date.now() - (lastFolderSync.get(folder) ?? 0) > FULL_SYNC_INTERVAL) {
+        try {
+          await syncGmailFolder(folder);
+        } catch (err) {
+          syncError = err;
+        }
       }
-      // Persist plain folder listings (not ad-hoc searches) for instant startup.
-      if (!search) {
-        cachePut(`gmail:list:${folder}`, result);
-        // Fire-and-forget: warm the body cache for the newest messages so
-        // they're readable offline without ever having been opened.
-        void prefetchBodies(result.slice(0, 10));
+      const mails = await readGmailFolder(folder);
+      if (syncError !== null && mails.length === 0) {
+        throw syncError instanceof Error
+          ? syncError
+          : new Error(String(syncError));
       }
-      return result;
+      return mails;
     },
     staleTime: 30_000,
   });
@@ -363,12 +504,12 @@ async function prefetchBodies(mails: Mail[]) {
   }
 }
 
-// Cache-only folder listing (null on cache miss) — painted while the network
-// listing above is in flight.
+// Local-store-only folder listing — instant, no network. Painted while the
+// syncing query above is in flight.
 export function gmailCachedListQuery(folder: string) {
   return queryOptions({
     queryKey: ["gmail", "list", folder, "@cache"],
-    queryFn: () => cacheGet<Mail[]>(`gmail:list:${folder}`),
+    queryFn: () => readGmailFolder(folder),
     staleTime: Infinity,
   });
 }
@@ -615,12 +756,79 @@ export async function sendMessage(msg: OutgoingMail) {
 
 // --- historyId delta sync ---
 //
-// Poll history.list with the last seen historyId; on any change, invalidate
-// gmail queries so open views refetch. Far cheaper than re-listing folders.
+// Poll history.list with the last seen historyId and apply the delta to the
+// LOCAL STORE (added messages fetched individually, deletions removed, label
+// changes patched), then invalidate so open views re-read SQLite. Steady
+// state costs one request per poll instead of re-listing whole folders.
+
+interface HistoryMessage {
+  id: string;
+  threadId?: string;
+  labelIds?: string[];
+}
+
+interface HistoryRecord {
+  messagesAdded?: { message: HistoryMessage }[];
+  messagesDeleted?: { message: HistoryMessage }[];
+  labelsAdded?: { message: HistoryMessage; labelIds?: string[] }[];
+  labelsRemoved?: { message: HistoryMessage; labelIds?: string[] }[];
+}
 
 interface HistoryResponse {
   historyId: string;
-  history?: unknown[];
+  history?: HistoryRecord[];
+}
+
+async function applyGmailHistory(records: HistoryRecord[]) {
+  const added = new Set<string>();
+  const deleted = new Set<string>();
+  const labelOps: { id: string; add: string[]; remove: string[] }[] = [];
+  for (const rec of records) {
+    for (const a of rec.messagesAdded ?? []) added.add(a.message.id);
+    for (const d of rec.messagesDeleted ?? []) {
+      deleted.add(d.message.id);
+      added.delete(d.message.id);
+    }
+    for (const l of rec.labelsAdded ?? [])
+      labelOps.push({ id: l.message.id, add: l.labelIds ?? [], remove: [] });
+    for (const l of rec.labelsRemoved ?? [])
+      labelOps.push({ id: l.message.id, add: [], remove: l.labelIds ?? [] });
+  }
+
+  const newIds = [...added];
+  if (newIds.length) {
+    const [names, messages] = await Promise.all([
+      labelNames(),
+      Promise.all(
+        newIds.map((id) =>
+          gmail<Message>(
+            `/messages/${id}?format=metadata` +
+              `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+          ).catch(() => null), // may already be gone again
+        ),
+      ),
+    ]);
+    const mails = messages
+      .filter((m): m is Message => m !== null)
+      .map((m) => toMail(m, names));
+    if (mails.length) {
+      await invoke("gmail_cache_upsert", {
+        account_id: GMAIL_CACHE_ACCOUNT,
+        messages: mails.map(mailToRow),
+      });
+      void prefetchBodies(mails);
+    }
+  }
+  if (deleted.size) {
+    await invoke("gmail_cache_delete", {
+      account_id: GMAIL_CACHE_ACCOUNT,
+      ids: [...deleted],
+    });
+  }
+  for (const op of labelOps) {
+    if (deleted.has(op.id) || added.has(op.id)) continue; // already final
+    await applyGmailLabelChange(op.id, op.add, op.remove);
+  }
 }
 
 export function useGmailSync(enabled = true, intervalMs = 30_000) {
@@ -644,13 +852,15 @@ export function useGmailSync(enabled = true, intervalMs = 30_000) {
         if (cancelled) return;
         lastHistoryId.current = delta.historyId;
         if (delta.history?.length) {
+          await applyGmailHistory(delta.history);
           queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
           queryClient.invalidateQueries({ queryKey: ["gmail", "counts"] });
         }
       } catch {
-        // Expired/invalid historyId (Gmail keeps history ~1 week) — reseed
-        // from the profile and refresh everything once.
+        // Expired/invalid historyId (Gmail keeps history ~1 week) — reseed,
+        // force full folder resyncs, and refresh everything once.
         lastHistoryId.current = null;
+        invalidateFolderSyncState();
         queryClient.invalidateQueries({ queryKey: ["gmail"] });
       }
     };

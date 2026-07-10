@@ -3,10 +3,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Mail } from "@/components/mail/data";
 import { useAccount } from "@/context/AccountContext";
 import {
+  applyGmailActionToCache,
+  applyGmailLabelChange,
   archiveMessage,
   markRead,
   markUnread,
-  persistGmailListCaches,
   setMessageTag,
   tagFolderId,
   trashMessage,
@@ -109,9 +110,6 @@ export function useMailActions(onRemoved?: (id: string) => void) {
       } catch (err) {
         if (!isNetworkError(err)) throw err;
         await queueGmailAction(id, action);
-        // Persist the optimistically-updated listings so a restart while
-        // still offline shows the same state.
-        persistGmailListCaches(queryClient);
       }
     },
     onMutate: async ({ action, id }) => {
@@ -191,6 +189,9 @@ export function useMailActions(onRemoved?: (id: string) => void) {
       }
 
       if (action === "archive" || action === "trash") onRemoved?.(id);
+      // Mirror the change into the local message store right away — durable
+      // across restarts whether the server call succeeds now or replays later.
+      void applyGmailActionToCache(id, action);
       return { previous, previousCounts, icloudPrevious: undefined };
     },
     onError: (_err, _vars, context) => {
@@ -261,6 +262,7 @@ export function useTagActions() {
     mutationFn: ({ id, tag, on }: { id: string; tag: Tag; on: boolean }) =>
       setMessageTag(id, tag.id, on),
     onMutate: async ({ id, tag, on }) => {
+      void applyGmailLabelChange(id, on ? [tag.id] : [], on ? [] : [tag.id]);
       await queryClient.cancelQueries({ queryKey: ["gmail", "list"] });
       const previous = queryClient.getQueriesData<Mail[]>({
         queryKey: ["gmail", "list"],

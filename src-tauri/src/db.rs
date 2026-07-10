@@ -63,12 +63,14 @@ impl CacheDb {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(|e| e.to_string())?;
-        if version < 2 {
+        if version < 3 {
             conn.execute_batch(
                 r#"
                 DROP TABLE IF EXISTS cached_messages;
                 DROP TABLE IF EXISTS sync_state;
-                PRAGMA user_version = 2;
+                DROP TABLE IF EXISTS gmail_messages;
+                DROP TABLE IF EXISTS gmail_message_labels;
+                PRAGMA user_version = 3;
                 "#,
             )
             .map_err(|e| e.to_string())?;
@@ -114,6 +116,33 @@ impl CacheDb {
                 json TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            -- Gmail message store: one row per message, label membership in a
+            -- join table so folder listings are index lookups.
+            CREATE TABLE IF NOT EXISTS gmail_messages (
+                account_id TEXT NOT NULL,
+                id TEXT NOT NULL,
+                thread_id TEXT,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                snippet TEXT NOT NULL DEFAULT '',
+                date TEXT NOT NULL,
+                read INTEGER NOT NULL DEFAULT 0,
+                label_ids TEXT NOT NULL DEFAULT '[]',
+                fetched_at TEXT NOT NULL,
+                PRIMARY KEY (account_id, id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_gmail_messages_date
+                ON gmail_messages(account_id, date DESC);
+            CREATE TABLE IF NOT EXISTS gmail_message_labels (
+                account_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                label_id TEXT NOT NULL,
+                PRIMARY KEY (account_id, message_id, label_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_gmail_labels_label
+                ON gmail_message_labels(account_id, label_id);
 
             -- Offline write queue: actions taken while offline, replayed
             -- against the provider when connectivity returns.
@@ -305,6 +334,212 @@ impl CacheDb {
         Ok(())
     }
 
+    // --- Gmail message store ---
+    //
+    // Folder semantics: a folder is either one label id (INBOX, DRAFT, tag
+    // labels, …) or `None` = Archive (no system folder label at all).
+
+    pub async fn gmail_replace_folder(
+        &self,
+        account_id: &str,
+        label_id: Option<&str>,
+        messages: &[GmailCachedMessage],
+    ) -> Result<(), String> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        match label_id {
+            Some(label) => {
+                tx.execute(
+                    "DELETE FROM gmail_messages WHERE account_id = ?1 AND id IN
+                     (SELECT message_id FROM gmail_message_labels
+                      WHERE account_id = ?1 AND label_id = ?2)",
+                    params![account_id, label],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            None => {
+                tx.execute(
+                    &format!(
+                        "DELETE FROM gmail_messages WHERE account_id = ?1 AND id NOT IN
+                         (SELECT message_id FROM gmail_message_labels
+                          WHERE account_id = ?1 AND label_id IN ({GMAIL_FOLDER_LABELS}))"
+                    ),
+                    params![account_id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        // Orphaned label rows from the deletes above
+        tx.execute(
+            "DELETE FROM gmail_message_labels WHERE account_id = ?1 AND message_id NOT IN
+             (SELECT id FROM gmail_messages WHERE account_id = ?1)",
+            params![account_id],
+        )
+        .map_err(|e| e.to_string())?;
+        gmail_upsert_in_tx(&tx, account_id, messages)?;
+        tx.commit().map_err(|e| e.to_string())
+    }
+
+    pub async fn gmail_upsert(
+        &self,
+        account_id: &str,
+        messages: &[GmailCachedMessage],
+    ) -> Result<(), String> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        gmail_upsert_in_tx(&tx, account_id, messages)?;
+        tx.commit().map_err(|e| e.to_string())
+    }
+
+    pub async fn gmail_list(
+        &self,
+        account_id: &str,
+        label_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<GmailCachedMessage>, String> {
+        let conn = self.conn.lock().await;
+        let (sql, has_label) = match label_id {
+            Some(_) => (
+                "SELECT m.id, m.thread_id, m.name, m.email, m.subject, m.snippet,
+                        m.date, m.read, m.label_ids
+                 FROM gmail_messages m
+                 JOIN gmail_message_labels l
+                   ON l.account_id = m.account_id AND l.message_id = m.id
+                 WHERE m.account_id = ?1 AND l.label_id = ?2
+                 ORDER BY m.date DESC LIMIT ?3"
+                    .to_string(),
+                true,
+            ),
+            None => (
+                format!(
+                    "SELECT id, thread_id, name, email, subject, snippet,
+                            date, read, label_ids
+                     FROM gmail_messages
+                     WHERE account_id = ?1 AND id NOT IN
+                       (SELECT message_id FROM gmail_message_labels
+                        WHERE account_id = ?1 AND label_id IN ({GMAIL_FOLDER_LABELS}))
+                     ORDER BY date DESC LIMIT ?2"
+                ),
+                false,
+            ),
+        };
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let map_row = |row: &Row<'_>| -> rusqlite::Result<GmailCachedMessage> {
+            let label_json: String = row.get(8)?;
+            Ok(GmailCachedMessage {
+                id: row.get(0)?,
+                thread_id: row.get(1)?,
+                name: row.get(2)?,
+                email: row.get(3)?,
+                subject: row.get(4)?,
+                snippet: row.get(5)?,
+                date: row.get(6)?,
+                read: row.get(7)?,
+                label_ids: serde_json::from_str(&label_json).unwrap_or_default(),
+            })
+        };
+        let rows = if has_label {
+            stmt.query_map(
+                params![account_id, label_id.unwrap(), limit as i64],
+                map_row,
+            )
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+        } else {
+            stmt.query_map(params![account_id, limit as i64], map_row)
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+        };
+        rows.map_err(|e| e.to_string())
+    }
+
+    pub async fn gmail_modify_labels(
+        &self,
+        account_id: &str,
+        message_id: &str,
+        add: &[String],
+        remove: &[String],
+    ) -> Result<(), String> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let label_json: Option<String> = tx
+            .query_row(
+                "SELECT label_ids FROM gmail_messages WHERE account_id = ?1 AND id = ?2",
+                params![account_id, message_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let Some(label_json) = label_json else {
+            return Ok(()); // not cached — nothing to do
+        };
+        let mut labels: Vec<String> = serde_json::from_str(&label_json).unwrap_or_default();
+        labels.retain(|l| !remove.contains(l));
+        for l in add {
+            if !labels.contains(l) {
+                labels.push(l.clone());
+            }
+        }
+        let read = !labels.iter().any(|l| l == "UNREAD");
+        tx.execute(
+            "UPDATE gmail_messages SET label_ids = ?3, read = ?4
+             WHERE account_id = ?1 AND id = ?2",
+            params![
+                account_id,
+                message_id,
+                serde_json::to_string(&labels).unwrap_or_default(),
+                read
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM gmail_message_labels WHERE account_id = ?1 AND message_id = ?2",
+            params![account_id, message_id],
+        )
+        .map_err(|e| e.to_string())?;
+        for label in &labels {
+            tx.execute(
+                "INSERT OR IGNORE INTO gmail_message_labels (account_id, message_id, label_id)
+                 VALUES (?1, ?2, ?3)",
+                params![account_id, message_id, label],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())
+    }
+
+    pub async fn gmail_delete(&self, account_id: &str, ids: &[String]) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        for id in ids {
+            conn.execute(
+                "DELETE FROM gmail_messages WHERE account_id = ?1 AND id = ?2",
+                params![account_id, id],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.execute(
+                "DELETE FROM gmail_message_labels WHERE account_id = ?1 AND message_id = ?2",
+                params![account_id, id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    pub async fn gmail_clear(&self, account_id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM gmail_messages WHERE account_id = ?1",
+            params![account_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM gmail_message_labels WHERE account_id = ?1",
+            params![account_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub async fn enqueue_op(&self, kind: &str, payload: &str) -> Result<i64, String> {
         let conn = self.conn.lock().await;
         conn.execute(
@@ -465,6 +700,66 @@ pub struct CachedMessage {
 pub struct SyncState {
     pub last_uid: u32,
     pub last_synced_at: String,
+}
+
+/// System labels that define the app's folders — a message carrying none of
+/// them is in Archive.
+const GMAIL_FOLDER_LABELS: &str = "'INBOX','SENT','DRAFT','SPAM','TRASH'";
+
+fn gmail_upsert_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    account_id: &str,
+    messages: &[GmailCachedMessage],
+) -> Result<(), String> {
+    let now = Utc::now().to_rfc3339();
+    for msg in messages {
+        tx.execute(
+            "INSERT OR REPLACE INTO gmail_messages
+             (account_id, id, thread_id, name, email, subject, snippet, date, read, label_ids, fetched_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                account_id,
+                msg.id,
+                msg.thread_id,
+                msg.name,
+                msg.email,
+                msg.subject,
+                msg.snippet,
+                msg.date,
+                msg.read,
+                serde_json::to_string(&msg.label_ids).unwrap_or_default(),
+                now,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM gmail_message_labels WHERE account_id = ?1 AND message_id = ?2",
+            params![account_id, msg.id],
+        )
+        .map_err(|e| e.to_string())?;
+        for label in &msg.label_ids {
+            tx.execute(
+                "INSERT OR IGNORE INTO gmail_message_labels (account_id, message_id, label_id)
+                 VALUES (?1, ?2, ?3)",
+                params![account_id, msg.id, label],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GmailCachedMessage {
+    pub id: String,
+    pub thread_id: Option<String>,
+    pub name: String,
+    pub email: String,
+    pub subject: String,
+    pub snippet: String,
+    pub date: String,
+    pub read: bool,
+    pub label_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
