@@ -8,8 +8,10 @@ import {
   LogOut,
   Plus,
   Send,
+  Settings,
   Tag as TagIcon,
   Trash2,
+  UserPlus,
   type LucideIcon,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -63,7 +65,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { folders } from "@/components/mail/data";
-import { signOut } from "@/lib/auth";
+import { useAccount } from "@/context/AccountContext";
 import { cn, isMac } from "@/lib/utils";
 import {
   avatarQuery,
@@ -75,6 +77,7 @@ import {
   tagsQuery,
   type Tag,
 } from "@/lib/gmail";
+import { invoke } from "@tauri-apps/api/core";
 
 const ICONS: Record<string, LucideIcon> = {
   inbox: Inbox,
@@ -105,6 +108,7 @@ export function MailSidebar({
   onSelectFolder: (id: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const { accounts, activeAccount, activeAccountId, switchAccount, addGoogleAccount, addICloudAccount, isLoading } = useAccount();
   const { data: profile } = useQuery(profileQuery);
   const { data: counts } = useQuery(folderCountsQuery);
   const { data: tags } = useQuery(tagsQuery);
@@ -112,6 +116,10 @@ export function MailSidebar({
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Tag | null>(null);
+  const [addAccountOpen, setAddAccountOpen] = useState(false);
+  const [addAccountType, setAddAccountType] = useState<"google" | "icloud">("google");
+  const [icloudEmail, setIcloudEmail] = useState("");
+  const [icloudPassword, setIcloudPassword] = useState("");
 
   const createTagMutation = useMutation({
     mutationFn: createTag,
@@ -127,25 +135,42 @@ export function MailSidebar({
     mutationFn: (tag: Tag) => deleteTag(tag.id),
     onSuccess: (_data, tag) => {
       queryClient.invalidateQueries({ queryKey: ["gmail", "tags"] });
-      // Gmail stripped the label from every message; refetch badges.
       queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
       if (activeFolder === tagFolderId(tag.id)) onSelectFolder("inbox");
     },
   });
 
   const signOutMutation = useMutation({
-    mutationFn: signOut,
+    mutationFn: () => invoke("sign_out"),
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: ["gmail"] });
       queryClient.invalidateQueries({ queryKey: ["auth"] });
     },
   });
 
-  const email = profile?.emailAddress;
+  const email = activeAccount?.email ?? profile?.emailAddress;
+
+  if (isLoading) {
+    return (
+      <Sidebar collapsible="icon">
+        <SidebarHeader data-tauri-drag-region className={cn(isMac && "pt-8")}>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton size="lg">
+                <div className="flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-lg bg-muted animate-pulse" />
+                  <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+                </div>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
+      </Sidebar>
+    );
+  }
 
   return (
     <Sidebar collapsible="icon">
-      {/* Clear the macOS traffic lights (transparent title bar overlay) */}
       <SidebarHeader data-tauri-drag-region className={cn(isMac && "pt-8")}>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -169,7 +194,34 @@ export function MailSidebar({
                   <ChevronsUpDown className="ml-auto size-4" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuContent align="start" className="w-64">
+                {/* Account switcher */}
+                <div className="p-2 border-b">
+                  <div className="px-2 py-1 text-xs text-muted-foreground uppercase">Accounts</div>
+                  {accounts.map((acc) => (
+                    <DropdownMenuItem
+                      key={acc.id}
+                      onSelect={() => switchAccount(acc.id)}
+                      className={acc.id === activeAccountId ? "bg-accent font-medium" : ""}
+                    >
+                      <span className="flex items-center gap-2 w-full">
+                        <span className="text-xs uppercase text-muted-foreground">
+                          {acc.kind === "google" ? "Google" : "iCloud"}
+                        </span>
+                        <span className="truncate">{acc.email}</span>
+                        {acc.is_default && <span className="ml-auto text-xs text-green-600">●</span>}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+                <DropdownMenuItem onSelect={() => { setAddAccountType("google"); setAddAccountOpen(true); }}>
+                  <UserPlus className="size-4" />
+                  Add Google account
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => { setAddAccountType("icloud"); setAddAccountOpen(true); }}>
+                  <Settings className="size-4" />
+                  Add iCloud account
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={signOutMutation.isPending}
                   onSelect={() => signOutMutation.mutate()}
@@ -298,6 +350,64 @@ export function MailSidebar({
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={addAccountOpen} onOpenChange={setAddAccountOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add {addAccountType === "google" ? "Google" : "iCloud"} account</DialogTitle>
+          </DialogHeader>
+          {addAccountType === "google" ? (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                Opens browser for Google OAuth sign-in.
+              </p>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setAddAccountOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={async () => { await addGoogleAccount(); setAddAccountOpen(false); }}>
+                  Sign in with Google
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <form
+              className="flex flex-col gap-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (icloudEmail && icloudPassword) {
+                  await addICloudAccount(icloudEmail, icloudPassword);
+                  setAddAccountOpen(false);
+                  setIcloudEmail("");
+                  setIcloudPassword("");
+                }
+              }}
+            >
+              <Input
+                autoFocus
+                placeholder="iCloud email"
+                value={icloudEmail}
+                onChange={(e) => setIcloudEmail(e.target.value)}
+                type="email"
+              />
+              <Input
+                placeholder="App-specific password"
+                value={icloudPassword}
+                onChange={(e) => setIcloudPassword(e.target.value)}
+                type="password"
+              />
+              <p className="text-xs text-muted-foreground">
+                Generate an app-specific password at <a href="https://appleid.apple.com" target="_blank" rel="noopener" className="underline">appleid.apple.com</a>
+              </p>
+              <DialogFooter>
+                <Button variant="outline" type="button" onClick={() => setAddAccountOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">Add account</Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
     </Sidebar>

@@ -30,4 +30,12 @@ sha2 = "0.10"
 base64 = "0.22"
 rand = "0.8"
 url = "2"
-
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+imap = { version = "2", features = ["tls"], default-features = false }
+mailparse = "0.15"
+native-tls = "0.2"
+imap-proto = "0.10"
+lettre = { version = "0.11", features = ["tokio1-native-tls"] }
+tokio = { version = "1", features = ["full"] }

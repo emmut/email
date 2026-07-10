@@ -10,10 +10,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RecipientInput } from "@/components/mail/recipient-input";
+import { useAccount } from "@/context/AccountContext";
 import {
   contactsQuery,
   sendMessage,
@@ -21,6 +28,7 @@ import {
   tagsQuery,
   type OutgoingMail,
 } from "@/lib/gmail";
+import { icloudSendMessage } from "@/lib/icloud";
 
 export interface ComposeDraft {
   to?: string;
@@ -114,6 +122,8 @@ function ComposeFields({
   signature: string;
   onClose: () => void;
 }) {
+  const { accounts, activeAccountId } = useAccount();
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(activeAccountId);
   const [to, setTo] = useState(draft.to ?? "");
   const [cc, setCc] = useState(draft.cc ?? "");
   const [bcc, setBcc] = useState("");
@@ -138,14 +148,39 @@ function ComposeFields({
 
   const queryClient = useQueryClient();
   const sendMutation = useMutation({
-    mutationFn: (msg: OutgoingMail) => sendMessage(msg),
+    mutationFn: async (msg: OutgoingMail) => {
+      const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+      if (selectedAccount?.kind === "icloud") {
+        // Send via iCloud IMAP/SMTP
+        await icloudSendMessage({
+          accountId: selectedAccount.id,
+          to: msg.to,
+          cc: msg.cc,
+          bcc: msg.bcc,
+          subject: msg.subject,
+          bodyText: msg.body,
+          bodyHtml: msg.html,
+          inReplyTo: msg.inReplyTo,
+          references: msg.references,
+        });
+      } else {
+        // Send via Gmail API (default)
+        await sendMessage(msg);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
+      queryClient.invalidateQueries({ queryKey: ["icloud"] });
       onClose();
     },
   });
 
   const isReply = Boolean(draft.inReplyTo);
+
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+  const fromLabel = selectedAccount
+    ? `${selectedAccount.kind === "google" ? "Google" : "iCloud"}: ${selectedAccount.email}`
+    : "Select account";
 
   return (
     <form
@@ -159,6 +194,7 @@ function ComposeFields({
       }}
       onSubmit={(e) => {
         e.preventDefault();
+        if (!selectedAccountId) return;
         sendMutation.mutate({
           to,
           cc: cc.trim() || undefined,
@@ -173,6 +209,30 @@ function ComposeFields({
         });
       }}
     >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" type="button" className="justify-start">
+            <span className="text-muted-foreground">From:</span>
+            <span className="truncate">{fromLabel}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-80">
+          {accounts.map((acc) => (
+            <DropdownMenuItem
+              key={acc.id}
+              onSelect={() => setSelectedAccountId(acc.id)}
+              className={acc.id === selectedAccountId ? "bg-accent font-medium" : ""}
+            >
+              <span className="flex items-center gap-2 w-full">
+                <span className="text-xs uppercase text-muted-foreground">
+                  {acc.kind === "google" ? "Google" : "iCloud"}
+                </span>
+                <span className="truncate">{acc.email}</span>
+              </span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
       <RecipientInput
         placeholder="To"
         required
