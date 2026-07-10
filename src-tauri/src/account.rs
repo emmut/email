@@ -254,10 +254,25 @@ async fn get_account_config_inner(
     serde_json::from_str(&config_json).map_err(|e| e.to_string())
 }
 
+/// The granted scopes (gmail.modify, contacts, userinfo.profile) do NOT
+/// include userinfo.email — the userinfo endpoint returns no email for us.
+/// The address comes from the Gmail profile endpoint instead (covered by the
+/// gmail scope); name/picture from userinfo are best-effort extras.
 async fn fetch_google_profile(access_token: &str) -> Result<GoogleProfile, String> {
+    #[derive(Deserialize)]
+    struct GmailProfile {
+        #[serde(rename = "emailAddress")]
+        email_address: String,
+    }
+    #[derive(Deserialize, Default)]
+    struct UserInfo {
+        name: Option<String>,
+        picture: Option<String>,
+    }
+
     let client = reqwest::Client::new();
     let res = client
-        .get("https://www.googleapis.com/oauth2/v2/userinfo")
+        .get("https://gmail.googleapis.com/gmail/v1/users/me/profile")
         .bearer_auth(access_token)
         .send()
         .await
@@ -265,13 +280,33 @@ async fn fetch_google_profile(access_token: &str) -> Result<GoogleProfile, Strin
     if !res.status().is_success() {
         return Err(format!("profile request failed: {}", res.status()));
     }
-    res.json().await.map_err(|e| e.to_string())
+    let gmail_profile: GmailProfile = res
+        .json()
+        .await
+        .map_err(|e| format!("unexpected profile response: {e}"))?;
+
+    let userinfo: UserInfo = async {
+        let res = client
+            .get("https://www.googleapis.com/oauth2/v2/userinfo")
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .ok()?;
+        res.json().await.ok()
+    }
+    .await
+    .unwrap_or_default();
+
+    Ok(GoogleProfile {
+        email: gmail_profile.email_address,
+        name: userinfo.name,
+        picture: userinfo.picture,
+    })
 }
 
-#[derive(Deserialize)]
-#[allow(dead_code)]
 struct GoogleProfile {
     email: String,
+    #[allow(dead_code)]
     name: Option<String>,
     picture: Option<String>,
 }
@@ -1702,6 +1737,71 @@ pub async fn cache_remove_message(
     uid: u32,
 ) -> Result<(), String> {
     cache.delete_messages(&account_id, &folder, &[uid]).await
+}
+
+// --- Gmail local message store ---
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn gmail_cache_replace_folder(
+    cache: State<'_, crate::db::CacheDb>,
+    account_id: String,
+    label_id: Option<String>,
+    messages: Vec<crate::db::GmailCachedMessage>,
+) -> Result<(), String> {
+    cache
+        .gmail_replace_folder(&account_id, label_id.as_deref(), &messages)
+        .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn gmail_cache_upsert(
+    cache: State<'_, crate::db::CacheDb>,
+    account_id: String,
+    messages: Vec<crate::db::GmailCachedMessage>,
+) -> Result<(), String> {
+    cache.gmail_upsert(&account_id, &messages).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn gmail_cache_list(
+    cache: State<'_, crate::db::CacheDb>,
+    account_id: String,
+    label_id: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<crate::db::GmailCachedMessage>, String> {
+    cache
+        .gmail_list(&account_id, label_id.as_deref(), limit.unwrap_or(50) as usize)
+        .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn gmail_cache_modify_labels(
+    cache: State<'_, crate::db::CacheDb>,
+    account_id: String,
+    message_id: String,
+    add: Vec<String>,
+    remove: Vec<String>,
+) -> Result<(), String> {
+    cache
+        .gmail_modify_labels(&account_id, &message_id, &add, &remove)
+        .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn gmail_cache_delete(
+    cache: State<'_, crate::db::CacheDb>,
+    account_id: String,
+    ids: Vec<String>,
+) -> Result<(), String> {
+    cache.gmail_delete(&account_id, &ids).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn gmail_cache_clear(
+    cache: State<'_, crate::db::CacheDb>,
+    account_id: String,
+) -> Result<(), String> {
+    cache.gmail_clear(&account_id).await
 }
 
 // --- offline operation queue ---
