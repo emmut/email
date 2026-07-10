@@ -20,7 +20,15 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: https: asset: http://asset.localhost",
+        "font-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost ws://localhost:1420 https://gmail.googleapis.com https://www.googleapis.com https://people.googleapis.com",
+        "frame-src": "'self'"
+      }
     }
   },
   "bundle": {

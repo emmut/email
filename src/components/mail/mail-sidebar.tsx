@@ -79,7 +79,9 @@ import {
   type Tag,
 } from "@/lib/gmail";
 import { icloudFolderCountsQuery } from "@/lib/icloud";
+import { pendingOpsQuery, useOnline } from "@/lib/offline";
 import { invoke } from "@tauri-apps/api/core";
+import { CloudOff } from "lucide-react";
 
 const ICONS: Record<string, LucideIcon> = {
   inbox: Inbox,
@@ -124,6 +126,9 @@ export function MailSidebar({
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Tag | null>(null);
+  const online = useOnline();
+  const { data: pendingOps } = useQuery(pendingOpsQuery);
+  const pendingCount = pendingOps?.length ?? 0;
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [addAccountType, setAddAccountType] = useState<"google" | "icloud">("google");
   const [icloudEmail, setIcloudEmail] = useState("");
@@ -323,6 +328,22 @@ export function MailSidebar({
             })}
           </SidebarMenu>
         </SidebarGroup>
+        )}
+        {(!online || pendingCount > 0) && (
+          <SidebarGroup className="mt-auto">
+            <div className="text-muted-foreground flex items-center gap-2 px-2 py-1 text-xs">
+              {!online && <CloudOff className="size-3.5 shrink-0" />}
+              <span>
+                {!online && pendingCount === 0 && "Offline"}
+                {!online &&
+                  pendingCount > 0 &&
+                  `Offline — ${pendingCount} pending ${pendingCount === 1 ? "change" : "changes"}`}
+                {online &&
+                  pendingCount > 0 &&
+                  `Syncing ${pendingCount} pending ${pendingCount === 1 ? "change" : "changes"}…`}
+              </span>
+            </div>
+          </SidebarGroup>
         )}
       </SidebarContent>
       <AlertDialog

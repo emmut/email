@@ -205,6 +205,8 @@ export function useMailActions(onRemoved?: (id: string) => void) {
       }
     },
     onSuccess: (_data, { action, id }) => {
+      // Keep the pending-ops indicator fresh (the action may have queued).
+      queryClient.invalidateQueries({ queryKey: ["ops"] });
       const ref = parseIcloudMailId(id);
       if (ref && activeAccount) {
         queryClient.invalidateQueries({

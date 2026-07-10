@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useQueryClient } from "@tanstack/react-query";
 
 import {
   archiveMessage,
@@ -34,6 +34,30 @@ interface PendingOp {
 // Ops that keep failing for non-network reasons (message deleted server-side,
 // account removed, …) are dropped rather than blocking the queue forever.
 const MAX_ATTEMPTS = 10;
+
+// Number of queued offline actions — drives the sidebar indicator.
+export const pendingOpsQuery = queryOptions({
+  queryKey: ["ops"],
+  queryFn: () => invoke<PendingOp[]>("ops_list"),
+  refetchInterval: 15_000,
+  staleTime: 5_000,
+});
+
+// Reactive navigator.onLine.
+export function useOnline(): boolean {
+  const [online, setOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+  return online;
+}
 
 /// Distinguish "network unreachable" from "server said no". Queue on the
 /// former, surface the latter.
@@ -180,6 +204,7 @@ export function useOfflineQueue(intervalMs = 60_000) {
       if (!cancelled && done > 0) {
         queryClient.invalidateQueries({ queryKey: ["gmail"] });
         queryClient.invalidateQueries({ queryKey: ["icloud"] });
+        queryClient.invalidateQueries({ queryKey: ["ops"] });
       }
     };
     void flush();

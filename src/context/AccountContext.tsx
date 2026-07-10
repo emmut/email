@@ -102,15 +102,11 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
     },
   });
 
-  const getGoogleAccessToken = async (accountId: string) => {
-    // Check cache first
-    const cached = queryClient.getQueryData<string>(googleAccessTokenQuery(accountId).queryKey);
-    if (cached) return cached;
-
-    const token = await invoke<string>("get_google_access_token", { account_id: accountId });
-    queryClient.setQueryData(googleAccessTokenQuery(accountId).queryKey, token);
-    return token;
-  };
+  const getGoogleAccessToken = (accountId: string) =>
+    // fetchQuery honours staleTime (50s) — getQueryData would keep returning
+    // a token past its ~55-minute expiry. The backend caches in memory, so a
+    // refetch is a hashmap lookup, not an OAuth round trip.
+    queryClient.fetchQuery(googleAccessTokenQuery(accountId));
 
   return (
     <AccountContext.Provider

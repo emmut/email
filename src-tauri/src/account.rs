@@ -121,6 +121,8 @@ fn init_db(conn: &Connection) -> rusqlite::Result<()> {
 fn get_conn(app: &AppHandle) -> Result<Connection, String> {
     let path = db_path(app);
     let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    let _ = conn.pragma_update(None, "journal_mode", "WAL");
+    let _ = conn.pragma_update(None, "busy_timeout", 5000);
     init_db(&conn).map_err(|e| e.to_string())?;
     Ok(conn)
 }
@@ -156,14 +158,76 @@ fn delete_secret(account_id: &str) -> Result<(), String> {
 
 pub struct AccountState {
     pub db: Arc<tokio::sync::Mutex<Connection>>,
+    /// In-memory Google access-token cache: account id → (token, expiry).
+    /// Access tokens are bearer credentials — they never touch disk.
+    pub tokens: tokio::sync::Mutex<std::collections::HashMap<String, (String, DateTime<Utc>)>>,
 }
 
 impl AccountState {
     pub fn new(app: &AppHandle) -> Result<Self, String> {
         let conn = get_conn(app)?;
+        scrub_secrets(&conn);
         Ok(Self {
             db: Arc::new(tokio::sync::Mutex::new(conn)),
+            tokens: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         })
+    }
+}
+
+/// One-time migration: earlier builds persisted the iCloud app password and
+/// Google tokens inside the accounts table's config JSON. Move them to the
+/// keychain (if not already there) and blank them in the DB — the keychain is
+/// the only durable secret store.
+fn scrub_secrets(conn: &Connection) {
+    let rows: Vec<(String, String)> = conn
+        .prepare("SELECT id, config FROM accounts")
+        .and_then(|mut stmt| {
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for (id, config_json) in rows {
+        let Ok(mut config) = serde_json::from_str::<AccountConfig>(&config_json) else {
+            continue;
+        };
+        let dirty = match &mut config {
+            AccountConfig::Google(g) => {
+                let mut dirty = false;
+                if !g.refresh_token.is_empty() {
+                    if matches!(load_secret(&id), Ok(None)) {
+                        let _ = store_secret(&id, &g.refresh_token);
+                    }
+                    g.refresh_token = String::new();
+                    dirty = true;
+                }
+                if g.access_token.is_some() || g.access_token_expires_at.is_some() {
+                    g.access_token = None;
+                    g.access_token_expires_at = None;
+                    dirty = true;
+                }
+                dirty
+            }
+            AccountConfig::Icloud(c) => {
+                if c.app_password.is_empty() {
+                    false
+                } else {
+                    if matches!(load_secret(&id), Ok(None)) {
+                        let _ = store_secret(&id, &c.app_password);
+                    }
+                    c.app_password = String::new();
+                    true
+                }
+            }
+        };
+        if dirty {
+            if let Ok(json) = serde_json::to_string(&config) {
+                let _ = conn.execute(
+                    "UPDATE accounts SET config = ?1 WHERE id = ?2",
+                    params![json, id],
+                );
+            }
+        }
     }
 }
 
@@ -346,11 +410,19 @@ pub async fn add_google_account(
         is_default: false,
     };
 
+    // Secrets live in the keychain (and tokens in memory) — never in the DB.
     let config = AccountConfig::Google(GoogleAccountConfig {
-        refresh_token: refresh.to_string(),
-        access_token: Some(access_token),
-        access_token_expires_at: Some(now + chrono::Duration::seconds(tokens.expires_in as i64 - 60)),
+        refresh_token: String::new(),
+        access_token: None,
+        access_token_expires_at: None,
     });
+    state.tokens.lock().await.insert(
+        account_id.clone(),
+        (
+            access_token,
+            now + chrono::Duration::seconds(tokens.expires_in as i64 - 60),
+        ),
+    );
 
     let db = state.db.lock().await;
     let is_first = db
@@ -432,7 +504,11 @@ pub async fn add_icloud_account(
         is_default: false,
     };
 
-    let config = AccountConfig::Icloud(icloud_config);
+    // The app password lives in the keychain only — blank it in the DB row.
+    let config = AccountConfig::Icloud(IcloudAccountConfig {
+        app_password: String::new(),
+        ..icloud_config
+    });
 
     let db = state.db.lock().await;
     let is_first = db
@@ -463,10 +539,13 @@ pub async fn add_icloud_account(
 pub async fn remove_account(
     state: State<'_, AccountState>,
     cache: State<'_, crate::db::CacheDb>,
+    pool: State<'_, ImapPool>,
     account_id: String,
 ) -> Result<(), String> {
-    // Delete from Keychain
+    // Delete from Keychain and drop in-memory credentials/connections
     delete_secret(&account_id)?;
+    state.tokens.lock().await.remove(&account_id);
+    pool.evict(&account_id);
 
     // Delete from DB
     {
@@ -525,14 +604,6 @@ pub async fn set_default_account(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn get_account_config(
-    state: State<'_, AccountState>,
-    account_id: String,
-) -> Result<AccountConfig, String> {
-    get_account_config_inner(&state, &account_id).await
-}
-
-#[tauri::command(rename_all = "snake_case")]
 pub async fn update_account_display_name(
     state: State<'_, AccountState>,
     account_id: String,
@@ -552,19 +623,22 @@ pub async fn get_google_access_token(
     state: State<'_, AccountState>,
     account_id: String,
 ) -> Result<String, String> {
-    let config = get_account_config_inner(&state, &account_id).await?;
-    let AccountConfig::Google(google_config) = config else {
-        return Err("not a Google account".to_string());
-    };
-
-    // Check cached token
-    if let (Some(token), Some(expires)) = (&google_config.access_token, &google_config.access_token_expires_at) {
-        if *expires > Utc::now() {
-            return Ok(token.clone());
+    // In-memory token cache — access tokens never touch disk.
+    {
+        let tokens = state.tokens.lock().await;
+        if let Some((token, expires)) = tokens.get(&account_id) {
+            if *expires > Utc::now() {
+                return Ok(token.clone());
+            }
         }
     }
 
-    // Refresh
+    let config = get_account_config_inner(&state, &account_id).await?;
+    let AccountConfig::Google(_) = config else {
+        return Err("not a Google account".to_string());
+    };
+
+    // Refresh using the keychain-held refresh token
     let refresh_token = load_secret(&account_id)?.ok_or("no refresh token in keychain")?;
     let client_id = oauth::client_id()?;
     let secret = oauth::client_secret();
@@ -579,41 +653,20 @@ pub async fn get_google_access_token(
 
     let tokens = oauth::exchange(&params).await?;
 
-    // Update stored config
-    let db = state.db.lock().await;
-    let new_config = AccountConfig::Google(GoogleAccountConfig {
-        refresh_token: tokens.refresh_token.as_deref().unwrap_or(&refresh_token).to_string(),
-        access_token: Some(tokens.access_token.clone()),
-        access_token_expires_at: Some(Utc::now() + chrono::Duration::seconds(tokens.expires_in as i64 - 60)),
-    });
-    db.execute(
-        "UPDATE accounts SET config = ?1, updated_at = ?2 WHERE id = ?3",
-        params![
-            &serde_json::to_string(&new_config).map_err(|e| e.to_string())?,
-            &Utc::now().to_rfc3339(),
-            &account_id,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Update keychain if refresh token rotated
-    if let Some(new_refresh) = tokens.refresh_token {
-        store_secret(&account_id, &new_refresh)?;
+    // Update keychain if the refresh token rotated
+    if let Some(new_refresh) = &tokens.refresh_token {
+        store_secret(&account_id, new_refresh)?;
     }
 
-    Ok(tokens.access_token)
-}
+    state.tokens.lock().await.insert(
+        account_id,
+        (
+            tokens.access_token.clone(),
+            Utc::now() + chrono::Duration::seconds(tokens.expires_in as i64 - 60),
+        ),
+    );
 
-#[tauri::command(rename_all = "snake_case")]
-pub async fn get_icloud_credentials(
-    state: State<'_, AccountState>,
-    account_id: String,
-) -> Result<IcloudAccountConfig, String> {
-    let config = get_account_config_inner(&state, &account_id).await?;
-    let AccountConfig::Icloud(cfg) = config else {
-        return Err("not an iCloud account".to_string());
-    };
-    Ok(cfg)
+    Ok(tokens.access_token)
 }
 
 // --- OAuth redirect handler ---
@@ -719,25 +772,33 @@ pub struct IcloudMessageDetail {
 #[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_list_folders(
     state: State<'_, AccountState>,
+    pool: State<'_, ImapPool>,
     account_id: String,
 ) -> Result<Vec<IcloudFolder>, String> {
     let config = get_icloud_config(&state, &account_id).await?;
-    tauri::async_runtime::spawn_blocking(move || list_folders_blocking(&config))
-        .await
-        .map_err(|e| e.to_string())?
+    let pool = pool.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_imap(&pool, &account_id, &config, list_folders_blocking)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_list_messages(
     state: State<'_, AccountState>,
+    pool: State<'_, ImapPool>,
     account_id: String,
     folder: String,
     limit: Option<u32>,
 ) -> Result<Vec<IcloudMessageSummary>, String> {
     let config = get_icloud_config(&state, &account_id).await?;
     let limit = limit.unwrap_or(50) as usize;
+    let pool = pool.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        list_messages_blocking(&config, &folder, limit)
+        with_imap(&pool, &account_id, &config, |s| {
+            list_messages_blocking(s, &folder, limit)
+        })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -747,6 +808,7 @@ pub async fn icloud_list_messages(
 pub async fn icloud_fetch_message(
     state: State<'_, AccountState>,
     cache: State<'_, crate::db::CacheDb>,
+    pool: State<'_, ImapPool>,
     account_id: String,
     folder: String,
     uid: u32,
@@ -772,9 +834,13 @@ pub async fn icloud_fetch_message(
     }
 
     let config = get_icloud_config(&state, &account_id).await?;
+    let imap = pool.0.clone();
     let folder_clone = folder.clone();
+    let account = account_id.clone();
     let detail = tauri::async_runtime::spawn_blocking(move || {
-        fetch_message_blocking(&config, &folder_clone, uid)
+        with_imap(&imap, &account, &config, |s| {
+            fetch_message_blocking(s, &folder_clone, uid)
+        })
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -829,15 +895,20 @@ pub async fn icloud_send_message(
 pub async fn icloud_mark_read(
     state: State<'_, AccountState>,
     cache: State<'_, crate::db::CacheDb>,
+    pool: State<'_, ImapPool>,
     account_id: String,
     folder: String,
     uid: u32,
     read: bool,
 ) -> Result<(), String> {
     let config = get_icloud_config(&state, &account_id).await?;
+    let imap = pool.0.clone();
     let folder_clone = folder.clone();
+    let account = account_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        mark_read_blocking(&config, &folder_clone, uid, read)
+        with_imap(&imap, &account, &config, |s| {
+            mark_read_blocking(s, &folder_clone, uid, read)
+        })
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -850,15 +921,20 @@ pub async fn icloud_mark_read(
 pub async fn icloud_move_message(
     state: State<'_, AccountState>,
     cache: State<'_, crate::db::CacheDb>,
+    pool: State<'_, ImapPool>,
     account_id: String,
     folder: String,
     uid: u32,
     target_folder: String,
 ) -> Result<(), String> {
     let config = get_icloud_config(&state, &account_id).await?;
+    let imap = pool.0.clone();
     let folder_clone = folder.clone();
+    let account = account_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        move_message_blocking(&config, &folder_clone, uid, &target_folder)
+        with_imap(&imap, &account, &config, |s| {
+            move_message_blocking(s, &folder_clone, uid, &target_folder)
+        })
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -869,12 +945,16 @@ pub async fn icloud_move_message(
 #[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_folder_counts(
     state: State<'_, AccountState>,
+    pool: State<'_, ImapPool>,
     account_id: String,
 ) -> Result<std::collections::HashMap<String, u32>, String> {
     let config = get_icloud_config(&state, &account_id).await?;
-    tauri::async_runtime::spawn_blocking(move || folder_counts_blocking(&config))
-        .await
-        .map_err(|e| e.to_string())?
+    let pool = pool.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_imap(&pool, &account_id, &config, folder_counts_blocking)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 async fn get_icloud_config(
@@ -883,7 +963,14 @@ async fn get_icloud_config(
 ) -> Result<IcloudAccountConfig, String> {
     let config = get_account_config_inner(state, account_id).await?;
     match config {
-        AccountConfig::Icloud(cfg) => Ok(cfg),
+        AccountConfig::Icloud(mut cfg) => {
+            // The DB row stores no secret — the keychain is the only store.
+            if cfg.app_password.is_empty() {
+                cfg.app_password =
+                    load_secret(account_id)?.ok_or("no app password in keychain")?;
+            }
+            Ok(cfg)
+        }
         _ => Err("not an iCloud account".to_string()),
     }
 }
@@ -891,6 +978,44 @@ async fn get_icloud_config(
 // --- blocking IMAP/SMTP helpers (run on blocking threads) ---
 
 type ImapSession = imap::Session<native_tls::TlsStream<std::net::TcpStream>>;
+type SessionMap = std::collections::HashMap<String, ImapSession>;
+
+/// Reused IMAP sessions per account. TLS + LOGIN costs hundreds of ms per
+/// operation; keeping the session alive makes every subsequent command a
+/// single round trip. A session is checked out of the map while in use, so
+/// concurrent operations simply open a second connection.
+#[derive(Default)]
+pub struct ImapPool(Arc<std::sync::Mutex<SessionMap>>);
+
+impl ImapPool {
+    pub fn evict(&self, account_id: &str) {
+        self.0.lock().unwrap().remove(account_id);
+    }
+}
+
+/// Run `f` against a pooled session; on failure (stale/dropped connection,
+/// server timeout) retry once on a fresh connection. Operations must be
+/// idempotent — all ours are (select/search/fetch/store/move/status).
+fn with_imap<T>(
+    pool: &Arc<std::sync::Mutex<SessionMap>>,
+    account_id: &str,
+    config: &IcloudAccountConfig,
+    f: impl Fn(&mut ImapSession) -> Result<T, String>,
+) -> Result<T, String> {
+    let existing = pool.lock().unwrap().remove(account_id);
+    if let Some(mut session) = existing {
+        if let Ok(value) = f(&mut session) {
+            pool.lock().unwrap().insert(account_id.to_string(), session);
+            return Ok(value);
+        }
+        // Likely a dead connection — fall through to a fresh one. If the
+        // error was real, the retry hits it again and reports it.
+    }
+    let mut session = connect_imap(config)?;
+    let value = f(&mut session)?;
+    pool.lock().unwrap().insert(account_id.to_string(), session);
+    Ok(value)
+}
 
 fn connect_imap(config: &IcloudAccountConfig) -> Result<ImapSession, String> {
     let connector = native_tls::TlsConnector::new().map_err(|e| format!("TLS init failed: {e}"))?;
@@ -906,8 +1031,7 @@ fn connect_imap(config: &IcloudAccountConfig) -> Result<ImapSession, String> {
     Ok(session)
 }
 
-fn list_folders_blocking(config: &IcloudAccountConfig) -> Result<Vec<IcloudFolder>, String> {
-    let mut session = connect_imap(config)?;
+fn list_folders_blocking(session: &mut ImapSession) -> Result<Vec<IcloudFolder>, String> {
     let folders = session
         .list(Some(""), Some("*"))
         .map_err(|e| format!("list folders failed: {e}"))?;
@@ -919,16 +1043,14 @@ fn list_folders_blocking(config: &IcloudAccountConfig) -> Result<Vec<IcloudFolde
             attributes: f.attributes().iter().map(|a| format!("{a:?}")).collect(),
         });
     }
-    let _ = session.logout();
     Ok(out)
 }
 
 fn list_messages_blocking(
-    config: &IcloudAccountConfig,
+    session: &mut ImapSession,
     folder: &str,
     limit: usize,
 ) -> Result<Vec<IcloudMessageSummary>, String> {
-    let mut session = connect_imap(config)?;
     session
         .select(folder)
         .map_err(|e| format!("select folder failed: {e}"))?;
@@ -939,7 +1061,6 @@ fn list_messages_blocking(
     let mut seqs: Vec<u32> = seqs.into_iter().collect();
     let total = seqs.len();
     if total == 0 {
-        let _ = session.logout();
         return Ok(Vec::new());
     }
     // Take the most recent `limit` by sequence number (highest = newest).
@@ -963,7 +1084,6 @@ fn list_messages_blocking(
 
     // Newest first.
     messages.reverse();
-    let _ = session.logout();
     Ok(messages)
 }
 
@@ -983,13 +1103,12 @@ struct IcloudSyncDelta {
 const BODY_PREFETCH: usize = 10;
 
 fn sync_messages_blocking(
-    config: &IcloudAccountConfig,
+    session: &mut ImapSession,
     folder: &str,
     limit: usize,
     last_uid: Option<u32>,
     known_uids: &[u32],
 ) -> Result<IcloudSyncDelta, String> {
-    let mut session = connect_imap(config)?;
     session
         .select(folder)
         .map_err(|e| format!("select folder failed: {e}"))?;
@@ -1077,7 +1196,6 @@ fn sync_messages_blocking(
             .collect();
     }
 
-    let _ = session.logout();
     Ok(IcloudSyncDelta {
         new_messages,
         bodies,
@@ -1087,11 +1205,10 @@ fn sync_messages_blocking(
 }
 
 fn fetch_message_blocking(
-    config: &IcloudAccountConfig,
+    session: &mut ImapSession,
     folder: &str,
     uid: u32,
 ) -> Result<IcloudMessageDetail, String> {
-    let mut session = connect_imap(config)?;
     session
         .select(folder)
         .map_err(|e| format!("select folder failed: {e}"))?;
@@ -1134,7 +1251,6 @@ fn fetch_message_blocking(
         None => (String::new(), None),
     };
 
-    let _ = session.logout();
     Ok(IcloudMessageDetail {
         uid,
         message_id,
@@ -1152,12 +1268,11 @@ fn fetch_message_blocking(
 }
 
 fn mark_read_blocking(
-    config: &IcloudAccountConfig,
+    session: &mut ImapSession,
     folder: &str,
     uid: u32,
     read: bool,
 ) -> Result<(), String> {
-    let mut session = connect_imap(config)?;
     session
         .select(folder)
         .map_err(|e| format!("select folder failed: {e}"))?;
@@ -1168,17 +1283,15 @@ fn mark_read_blocking(
         session.uid_store(&set, "-FLAGS (\\Seen)")
     };
     res.map_err(|e| format!("store flags failed: {e}"))?;
-    let _ = session.logout();
     Ok(())
 }
 
 fn move_message_blocking(
-    config: &IcloudAccountConfig,
+    session: &mut ImapSession,
     folder: &str,
     uid: u32,
     target_folder: &str,
 ) -> Result<(), String> {
-    let mut session = connect_imap(config)?;
     session
         .select(folder)
         .map_err(|e| format!("select folder failed: {e}"))?;
@@ -1195,16 +1308,14 @@ fn move_message_blocking(
             .expunge()
             .map_err(|e| format!("expunge failed: {e}"))?;
     }
-    let _ = session.logout();
     Ok(())
 }
 
 /// Badge counts keyed by app folder id: unread for inbox/junk, totals for
 /// drafts (matching the Gmail sidebar semantics). Missing folders are skipped.
 fn folder_counts_blocking(
-    config: &IcloudAccountConfig,
+    session: &mut ImapSession,
 ) -> Result<std::collections::HashMap<String, u32>, String> {
-    let mut session = connect_imap(config)?;
     let mut counts = std::collections::HashMap::new();
     for (id, mailbox, unread) in [
         ("inbox", "INBOX", true),
@@ -1220,7 +1331,6 @@ fn folder_counts_blocking(
             counts.insert(id.to_string(), count);
         }
     }
-    let _ = session.logout();
     Ok(counts)
 }
 
@@ -1463,6 +1573,7 @@ pub async fn cache_mark_read(
 pub async fn cache_sync_icloud(
     state: State<'_, AccountState>,
     cache: State<'_, crate::db::CacheDb>,
+    pool: State<'_, ImapPool>,
     account_id: String,
     folder: String,
     limit: Option<u32>,
@@ -1476,9 +1587,13 @@ pub async fn cache_sync_icloud(
         .map(|s| s.last_uid);
     let known_uids = cache.list_uids(&account_id, &folder).await?;
 
+    let imap = pool.0.clone();
     let folder_clone = folder.clone();
+    let account = account_id.clone();
     let delta = tauri::async_runtime::spawn_blocking(move || {
-        sync_messages_blocking(&config, &folder_clone, limit, last_uid, &known_uids)
+        with_imap(&imap, &account, &config, |s| {
+            sync_messages_blocking(s, &folder_clone, limit, last_uid, &known_uids)
+        })
     })
     .await
     .map_err(|e| e.to_string())??;

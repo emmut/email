@@ -13,6 +13,7 @@ pub fn run() {
             app.manage(auth_state);
             let account_state = account::AccountState::new(app.handle())?;
             app.manage(account_state);
+            app.manage(account::ImapPool::default());
             let cache_db = db::CacheDb::new(app.handle())?;
             app.manage(cache_db);
             Ok(())
@@ -27,10 +28,8 @@ pub fn run() {
             account::add_icloud_account,
             account::remove_account,
             account::set_default_account,
-            account::get_account_config,
             account::update_account_display_name,
             account::get_google_access_token,
-            account::get_icloud_credentials,
             account::icloud_list_folders,
             account::icloud_list_messages,
             account::icloud_fetch_message,

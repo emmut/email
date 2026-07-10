@@ -345,11 +345,18 @@ export function mailListQuery(folder: string, search: string) {
   });
 }
 
+// Ids checked once per session — list queries refetch every 30s and the
+// answer for an already-cached body never changes.
+const prefetchedBodies = new Set<string>();
+
 async function prefetchBodies(mails: Mail[]) {
   for (const mail of mails) {
+    if (prefetchedBodies.has(mail.id)) continue;
     try {
-      if (await cacheGet<MailBody>(`gmail:body:${mail.id}`)) continue;
-      await fetchMailBody(mail.id); // caches as a side effect
+      if (!(await cacheGet<MailBody>(`gmail:body:${mail.id}`))) {
+        await fetchMailBody(mail.id); // caches as a side effect
+      }
+      prefetchedBodies.add(mail.id);
     } catch {
       return; // network gone — stop quietly
     }
@@ -561,15 +568,21 @@ function mimePart(type: string, content: string): string {
   );
 }
 
+// CR/LF in a header value would let pasted input inject additional headers
+// (e.g. a hidden Bcc) into the raw RFC 822 message.
+function stripNewlines(value: string): string {
+  return value.replace(/[\r\n]+/g, " ").trim();
+}
+
 // Build an RFC 822 message and send it. Gmail fills in From/Date/Message-ID.
 export async function sendMessage(msg: OutgoingMail) {
   const headers = [
-    `To: ${msg.to}`,
-    ...(msg.cc ? [`Cc: ${msg.cc}`] : []),
-    ...(msg.bcc ? [`Bcc: ${msg.bcc}`] : []),
-    `Subject: ${encodeHeaderValue(msg.subject)}`,
-    ...(msg.inReplyTo ? [`In-Reply-To: ${msg.inReplyTo}`] : []),
-    ...(msg.references ? [`References: ${msg.references}`] : []),
+    `To: ${stripNewlines(msg.to)}`,
+    ...(msg.cc ? [`Cc: ${stripNewlines(msg.cc)}`] : []),
+    ...(msg.bcc ? [`Bcc: ${stripNewlines(msg.bcc)}`] : []),
+    `Subject: ${encodeHeaderValue(stripNewlines(msg.subject))}`,
+    ...(msg.inReplyTo ? [`In-Reply-To: ${stripNewlines(msg.inReplyTo)}`] : []),
+    ...(msg.references ? [`References: ${stripNewlines(msg.references)}`] : []),
     "MIME-Version: 1.0",
   ];
 

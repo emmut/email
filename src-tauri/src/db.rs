@@ -46,6 +46,11 @@ impl CacheDb {
     pub fn new(app: &AppHandle) -> Result<Self, String> {
         let path = cache_db_path(app);
         let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+        // WAL keeps readers unblocked during sync writes; NORMAL sync is safe
+        // with WAL and much faster for a disposable cache.
+        let _ = conn.pragma_update(None, "journal_mode", "WAL");
+        let _ = conn.pragma_update(None, "synchronous", "NORMAL");
+        let _ = conn.pragma_update(None, "busy_timeout", 5000);
         Self::init_tables(&conn)?;
         Ok(Self {
             conn: Arc::new(tokio::sync::Mutex::new(conn)),

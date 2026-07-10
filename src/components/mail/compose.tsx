@@ -33,6 +33,7 @@ import {
   isNetworkError,
   queueGmailSend,
   queueIcloudSend,
+  useOnline,
 } from "@/lib/offline";
 
 export interface ComposeDraft {
@@ -196,10 +197,12 @@ function ComposeFields({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
       queryClient.invalidateQueries({ queryKey: ["icloud"] });
+      queryClient.invalidateQueries({ queryKey: ["ops"] });
       onClose();
     },
   });
 
+  const online = useOnline();
   const isReply = Boolean(draft.inReplyTo);
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
@@ -311,13 +314,18 @@ function ComposeFields({
         </div>
       ) : null}
       <DialogFooter className="items-center gap-3">
-        {sendMutation.isError && (
+        {sendMutation.isError ? (
           <span className="text-destructive mr-auto text-xs">
             Send failed: {sendMutation.error.message}
           </span>
-        )}
+        ) : !online ? (
+          <span className="text-muted-foreground mr-auto text-xs">
+            You’re offline — the message will be queued and sent when the
+            connection returns.
+          </span>
+        ) : null}
         <Button type="submit" disabled={sendMutation.isPending}>
-          {sendMutation.isPending ? "Sending…" : "Send"}
+          {sendMutation.isPending ? "Sending…" : online ? "Send" : "Queue"}
         </Button>
       </DialogFooter>
     </form>
