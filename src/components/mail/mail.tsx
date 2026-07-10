@@ -27,7 +27,10 @@ import { MailList } from "@/components/mail/mail-list";
 import { MailDisplay } from "@/components/mail/mail-display";
 import type { Mail as MailItem } from "@/components/mail/data";
 import { ShortcutsHelp } from "@/components/mail/shortcuts-help";
+import { CommandPalette } from "@/components/mail/command-palette";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
+import { noDialogOpen, useMenuEvents } from "@/hooks/use-menu";
+import { folders } from "@/components/mail/data";
 import { useMailActions } from "@/hooks/use-mail-actions";
 import {
   gmailCachedListQuery,
@@ -56,6 +59,7 @@ export function Mail() {
   // Emails read while the unread tab is open stay listed until the view changes
   const [keptReadIds, setKeptReadIds] = useState<Set<string>>(new Set());
   const [helpOpen, setHelpOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const { activeAccount } = useAccount();
@@ -188,6 +192,25 @@ export function Mail() {
     "?": () => setHelpOpen(true),
   });
 
+  // Native menu commands (File/Go/Message/Help). Reply and Reply All are
+  // handled in MailDisplay, the palette toggle in CommandPalette.
+  useMenuEvents({
+    compose: () => noDialogOpen() && setComposeDraft({}),
+    shortcuts: () => setHelpOpen(true),
+    undo: () => document.execCommand("undo"),
+    redo: () => document.execCommand("redo"),
+    archive: () =>
+      noDialogOpen() && selected && act("archive", selected.id),
+    trash: () => noDialogOpen() && selected && act("trash", selected.id),
+    toggle_read: () =>
+      noDialogOpen() &&
+      selected &&
+      act(selected.read ? "unread" : "read", selected.id),
+    ...Object.fromEntries(
+      folders.map((f) => [`go_${f.id}`, () => selectFolder(f.id)]),
+    ),
+  });
+
   return (
     <SidebarProvider>
       <MailSidebar activeFolder={activeFolder} onSelectFolder={selectFolder} />
@@ -277,6 +300,21 @@ export function Mail() {
           onClose={() => setComposeDraft(null)}
         />
         <ShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} />
+        <CommandPalette
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+          selected={selected}
+          onSelectFolder={selectFolder}
+          onCompose={() => setComposeDraft({})}
+          // Wait out the dialog's close (Radix restores focus on unmount).
+          onFocusSearch={() => setTimeout(() => searchRef.current?.focus(), 250)}
+          onShowShortcuts={() => setHelpOpen(true)}
+          onSetTab={(t) => {
+            setTab(t);
+            setKeptReadIds(new Set());
+          }}
+          onAct={act}
+        />
       </SidebarInset>
     </SidebarProvider>
   );

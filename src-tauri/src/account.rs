@@ -1249,7 +1249,7 @@ fn fetch_message_blocking(
         .map(|v| v.iter().map(address_to_string).collect::<Vec<_>>().join(", "));
     let subject = envelope
         .and_then(|e| e.subject)
-        .map(|s| String::from_utf8_lossy(s).into_owned())
+        .map(|s| decode_envelope_string(s))
         .unwrap_or_default();
     let message_id = envelope
         .and_then(|e| e.message_id)
@@ -1449,6 +1449,19 @@ fn smtp_send_blocking(
 
 // --- helpers ---
 
+/// ENVELOPE strings are raw header bytes and may contain RFC 2047
+/// encoded-words (`=?UTF-8?B?…?=`); decode them for display.
+pub(crate) fn decode_envelope_string(raw: &[u8]) -> String {
+    let mut line = Vec::with_capacity(raw.len() + 4);
+    line.extend_from_slice(b"S: ");
+    line.extend_from_slice(raw);
+    line.push(b'\n');
+    match mailparse::parse_header(&line) {
+        Ok((header, _)) => header.get_value(),
+        Err(_) => String::from_utf8_lossy(raw).into_owned(),
+    }
+}
+
 /// Envelope dates are RFC 2822; normalize to RFC 3339 so SQLite's
 /// `ORDER BY date DESC` and JS `new Date()` both behave.
 fn normalize_date(raw: Option<String>) -> Option<String> {
@@ -1478,7 +1491,7 @@ fn summary_from_fetch(fetch: &imap::types::Fetch, folder: &str) -> IcloudMessage
         .unwrap_or_default();
     let subject = envelope
         .and_then(|e| e.subject)
-        .map(|s| String::from_utf8_lossy(s).into_owned())
+        .map(|s| decode_envelope_string(s))
         .unwrap_or_else(|| "(no subject)".to_string());
     let message_id = envelope
         .and_then(|e| e.message_id)
@@ -1515,7 +1528,7 @@ fn address_to_string(addr: &imap_proto::Address) -> String {
 fn parse_address(addr: Option<&imap_proto::Address>) -> (Option<String>, String) {
     match addr {
         Some(a) => {
-            let name = a.name.map(|b| String::from_utf8_lossy(b).into_owned());
+            let name = a.name.map(|b| decode_envelope_string(b));
             let email = address_to_string(a);
             (name, email)
         }
@@ -1839,9 +1852,42 @@ pub async fn ops_bump(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn cache_contacts(
+    cache: State<'_, crate::db::CacheDb>,
+) -> Result<Vec<crate::db::CachedContact>, String> {
+    cache.icloud_contacts().await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn cache_delete_account(
     cache: State<'_, crate::db::CacheDb>,
     account_id: String,
 ) -> Result<(), String> {
     cache.delete_account_cache(&account_id).await
+}
+#[cfg(test)]
+mod tests {
+    use super::decode_envelope_string;
+
+    #[test]
+    fn decodes_encoded_words() {
+        assert_eq!(
+            decode_envelope_string("=?utf-8?Q?V=C3=A4lkommen_till_M=C3=B6tet?=".as_bytes()),
+            "Välkommen till Mötet"
+        );
+        assert_eq!(
+            decode_envelope_string("=?UTF-8?B?SGVqIPCfkYs=?=".as_bytes()),
+            "Hej 👋"
+        );
+        assert_eq!(decode_envelope_string(b"Plain subject"), "Plain subject");
+        // Long subjects arrive as multiple encoded words; whitespace between
+        // them is not part of the text (GitHub notification style).
+        assert_eq!(
+            decode_envelope_string(
+                "=?utf-8?q?[acme/rockets]_PR_run_failed:_CI_-_=E2=99=BB=EF=B8=8F_refactor_?= =?utf-8?q?launcher_into_pad_(0000000)?="
+                    .as_bytes()
+            ),
+            "[acme/rockets] PR run failed: CI - ♻️ refactor launcher into pad (0000000)"
+        );
+    }
 }

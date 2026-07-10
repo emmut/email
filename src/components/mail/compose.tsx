@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Badge } from "@/components/ui/badge";
@@ -24,11 +24,12 @@ import { useAccount } from "@/context/AccountContext";
 import {
   contactsQuery,
   sendMessage,
-  signatureQuery,
   tagsQuery,
+  type Contact,
   type OutgoingMail,
 } from "@/lib/gmail";
-import { icloudSendMessage } from "@/lib/icloud";
+import { useSignature } from "@/lib/signature";
+import { icloudContactsQuery, icloudSendMessage } from "@/lib/icloud";
 import {
   isNetworkError,
   queueGmailSend,
@@ -95,28 +96,23 @@ function ComposeForm({
   onClose: () => void;
 }) {
   // The editor takes its content at mount, so wait for the signature first.
-  // Signatures come from Gmail settings — skip for iCloud accounts.
+  // Resolved per account: local signature, Gmail-hosted fallback (Google).
   const { activeAccount } = useAccount();
-  const isIcloud = activeAccount?.kind === "icloud";
-  const signature = useQuery({ ...signatureQuery, enabled: !isIcloud });
+  const { signature, isPending } = useSignature(activeAccount);
 
   return (
     <DialogContent className="sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle>{draft.inReplyTo ? "Reply" : "New message"}</DialogTitle>
       </DialogHeader>
-      {!isIcloud && signature.isPending ? (
+      {isPending ? (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-8 w-full" />
           <Skeleton className="h-8 w-full" />
           <Skeleton className="h-44 w-full" />
         </div>
       ) : (
-        <ComposeFields
-          draft={draft}
-          signature={signature.data ?? ""}
-          onClose={onClose}
-        />
+        <ComposeFields draft={draft} signature={signature} onClose={onClose} />
       )}
     </DialogContent>
   );
@@ -139,8 +135,8 @@ function ComposeFields({
   const [subject, setSubject] = useState(draft.subject ?? "");
   const [tagIds, setTagIds] = useState<string[]>([]);
 
-  const selectedIsIcloud =
-    accounts.find((a) => a.id === selectedAccountId)?.kind === "icloud";
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+  const selectedIsIcloud = selectedAccount?.kind === "icloud";
 
   // Tags and contact autocomplete are Gmail features.
   const { data: tags } = useQuery({ ...tagsQuery, enabled: !selectedIsIcloud });
@@ -150,14 +146,52 @@ function ComposeFields({
       prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id],
     );
 
-  const initialHtml =
+  const buildHtml = (sig: string) =>
     "<p></p>" +
-    (signature ? `<p></p><p>--</p>${tidySignature(signature)}` : "") +
+    (sig ? `<p></p><p>--</p>${tidySignature(sig)}` : "") +
     (draft.bodyHtml ?? "");
-  const [body, setBody] = useState(() => ({ html: initialHtml, text: "" }));
+  const [body, setBody] = useState(() => ({
+    html: buildHtml(signature),
+    text: "",
+  }));
 
-  const { data: contacts, isError: contactsFailed, error: contactsError } =
-    useQuery({ ...contactsQuery, enabled: !selectedIsIcloud });
+  // The signature follows the From account. When it changes and the user
+  // hasn't typed yet, rebuild the editor content with the new account's
+  // signature (a bumped key remounts the editor). Once the user has typed we
+  // leave the content alone rather than clobber it.
+  const edited = useRef(false);
+  const [editorKey, setEditorKey] = useState(0);
+  const [currentSig, setCurrentSig] = useState(signature);
+  const selectedSig = useSignature(selectedAccount);
+  useEffect(() => {
+    if (selectedSig.isPending || edited.current) return;
+    if (selectedSig.signature === currentSig) return;
+    setCurrentSig(selectedSig.signature);
+    setBody({ html: buildHtml(selectedSig.signature), text: "" });
+    setEditorKey((k) => k + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSig.signature, selectedSig.isPending]);
+
+  // Contacts from every connected source, deduped by address (a contact in
+  // both keeps the named/Google entry). The list itself shows the origin.
+  const hasGoogle = accounts.length === 0 || accounts.some((a) => a.kind === "google");
+  const hasIcloud = accounts.some((a) => a.kind === "icloud");
+  const googleContacts = useQuery({ ...contactsQuery, enabled: hasGoogle });
+  const icloudContacts = useQuery({ ...icloudContactsQuery, enabled: hasIcloud });
+  const contactsFailed = hasGoogle && googleContacts.isError;
+  const contactsError = googleContacts.error;
+  const contacts = useMemo(() => {
+    const byEmail = new Map<string, Contact>();
+    for (const c of [
+      ...(googleContacts.data ?? []),
+      ...(icloudContacts.data ?? []),
+    ]) {
+      const key = c.email.toLowerCase();
+      const existing = byEmail.get(key);
+      if (!existing || (!existing.name && c.name)) byEmail.set(key, c);
+    }
+    return [...byEmail.values()];
+  }, [googleContacts.data, icloudContacts.data]);
 
   const queryClient = useQueryClient();
   const sendMutation = useMutation({
@@ -205,7 +239,6 @@ function ComposeFields({
   const online = useOnline();
   const isReply = Boolean(draft.inReplyTo);
 
-  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
   const fromLabel = selectedAccount
     ? `${selectedAccount.kind === "google" ? "Google" : "iCloud"}: ${selectedAccount.email}`
     : "Select account";
@@ -283,7 +316,7 @@ function ComposeFields({
       />
       {contactsFailed && (
         <p className="text-muted-foreground text-xs">
-          Contact autocomplete unavailable: {contactsError.message}
+          Contact autocomplete unavailable: {contactsError?.message}
         </p>
       )}
       <Input
@@ -293,9 +326,13 @@ function ComposeFields({
         onChange={(e) => setSubject(e.target.value)}
       />
       <RichTextEditor
-        initialHtml={initialHtml}
+        key={editorKey}
+        initialHtml={body.html}
         autoFocus={isReply}
-        onChange={(html, text) => setBody({ html, text })}
+        onChange={(html, text) => {
+          edited.current = true;
+          setBody({ html, text });
+        }}
       />
       {!selectedIsIcloud && tags?.length ? (
         <div className="flex flex-wrap items-center gap-1.5">

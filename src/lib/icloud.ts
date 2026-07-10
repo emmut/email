@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { queryOptions } from "@tanstack/react-query";
 import { cacheGet, cachePut } from "@/lib/cache";
 import type { Mail } from "@/components/mail/data";
-import type { MailBody } from "@/lib/gmail";
+import type { Contact, MailBody } from "@/lib/gmail";
 
 // App folder ids (sidebar) → iCloud IMAP mailbox names.
 export const ICLOUD_FOLDER_NAMES: Record<string, string> = {
@@ -261,3 +261,22 @@ export function toMail(msg: IcloudMessageSummary): Mail {
   };
 }
 
+
+// --- contacts ---
+
+// IMAP has no contacts API; the local message cache (senders + recipients)
+// is the best available address book for iCloud accounts.
+export const icloudContactsQuery = queryOptions({
+  queryKey: ["icloud", "contacts"],
+  queryFn: async (): Promise<Contact[]> => {
+    const rows = await invoke<{ name: string | null; email: string }[]>(
+      "cache_contacts",
+    );
+    return rows.map((r) => ({
+      name: r.name ?? "",
+      email: r.email,
+      source: "icloud" as const,
+    }));
+  },
+  staleTime: 5 * 60_000,
+});

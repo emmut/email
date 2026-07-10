@@ -9,6 +9,7 @@ import {
   Plus,
   Send,
   Settings,
+  SquarePen,
   Tag as TagIcon,
   Trash2,
   UserPlus,
@@ -65,6 +66,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { folders } from "@/components/mail/data";
+import { SignatureDialog } from "@/components/mail/signature-dialog";
 import { useAccount } from "@/context/AccountContext";
 import { cn, isMac } from "@/lib/utils";
 import {
@@ -130,6 +132,7 @@ export function MailSidebar({
   const { data: pendingOps } = useQuery(pendingOpsQuery);
   const pendingCount = pendingOps?.length ?? 0;
   const [addAccountOpen, setAddAccountOpen] = useState(false);
+  const [signatureOpen, setSignatureOpen] = useState(false);
   const [addAccountType, setAddAccountType] = useState<"google" | "icloud">("google");
   const [icloudEmail, setIcloudEmail] = useState("");
   const [icloudPassword, setIcloudPassword] = useState("");
@@ -254,6 +257,12 @@ export function MailSidebar({
                   <Settings className="size-4" />
                   Add iCloud account
                 </DropdownMenuItem>
+                {activeAccount && (
+                  <DropdownMenuItem onSelect={() => setSignatureOpen(true)}>
+                    <SquarePen className="size-4" />
+                    Edit signature
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   disabled={signOutMutation.isPending}
                   onSelect={() => signOutMutation.mutate()}
@@ -402,6 +411,7 @@ export function MailSidebar({
           </form>
         </DialogContent>
       </Dialog>
+      <SignatureDialog open={signatureOpen} onOpenChange={setSignatureOpen} />
       <Dialog open={addAccountOpen} onOpenChange={setAddAccountOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>

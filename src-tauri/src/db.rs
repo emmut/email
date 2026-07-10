@@ -9,18 +9,28 @@ use tauri::{AppHandle, Manager};
 const MESSAGE_COLUMNS: &str = "uid, message_id, from_name, from_email, \"to\", cc, refs, subject,
      snippet, body_text, body_html, date, flags, read";
 
+// Rows synced before encoded-word decoding landed hold raw RFC 2047 text;
+// decode on read so the old cache heals without a resync.
+fn fix_encoded(s: String) -> String {
+    if s.contains("=?") {
+        crate::account::decode_envelope_string(s.as_bytes())
+    } else {
+        s
+    }
+}
+
 fn row_to_message(row: &Row<'_>) -> rusqlite::Result<CachedMessage> {
     let flags_json: String = row.get(12)?;
     let flags: Vec<String> = serde_json::from_str(&flags_json).unwrap_or_default();
     Ok(CachedMessage {
         uid: row.get(0)?,
         message_id: row.get(1)?,
-        from_name: row.get(2)?,
+        from_name: row.get::<_, Option<String>>(2)?.map(fix_encoded),
         from_email: row.get(3)?,
         to: row.get(4)?,
         cc: row.get(5)?,
         references: row.get(6)?,
-        subject: row.get(7)?,
+        subject: fix_encoded(row.get(7)?),
         snippet: row.get(8)?,
         body_text: row.get(9)?,
         body_html: row.get(10)?,
@@ -28,6 +38,12 @@ fn row_to_message(row: &Row<'_>) -> rusqlite::Result<CachedMessage> {
         flags,
         read: row.get(13)?,
     })
+}
+
+#[derive(Debug, Serialize)]
+pub struct CachedContact {
+    pub name: Option<String>,
+    pub email: String,
 }
 
 const CACHE_DB_NAME: &str = "mail_cache.db";
@@ -429,9 +445,9 @@ impl CacheDb {
             Ok(GmailCachedMessage {
                 id: row.get(0)?,
                 thread_id: row.get(1)?,
-                name: row.get(2)?,
+                name: fix_encoded(row.get(2)?),
                 email: row.get(3)?,
-                subject: row.get(4)?,
+                subject: fix_encoded(row.get(4)?),
                 snippet: row.get(5)?,
                 date: row.get(6)?,
                 read: row.get(7)?,
@@ -643,6 +659,69 @@ impl CacheDb {
             Some(row) => Ok(Some(row.map_err(|e| e.to_string())?)),
             None => Ok(None),
         }
+    }
+
+    /// Contacts derived from the iCloud message cache: everyone we've
+    /// received from, plus every To/Cc recipient (IMAP has no contacts API,
+    /// so mail history is the best available address book).
+    pub async fn icloud_contacts(&self) -> Result<Vec<CachedContact>, String> {
+        let conn = self.conn.lock().await;
+        let mut by_email: std::collections::HashMap<String, CachedContact> =
+            std::collections::HashMap::new();
+
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT from_name, from_email FROM cached_messages")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (name, email) = row.map_err(|e| e.to_string())?;
+            if !email.contains('@') {
+                continue; // parse_address "unknown" placeholder
+            }
+            let name = name.map(fix_encoded).filter(|n| !n.trim().is_empty());
+            let entry = by_email
+                .entry(email.to_lowercase())
+                .or_insert(CachedContact { name: None, email });
+            if entry.name.is_none() {
+                entry.name = name;
+            }
+        }
+
+        let mut stmt = conn
+            .prepare(r#"SELECT DISTINCT "to", cc FROM cached_messages"#)
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (to, cc) = row.map_err(|e| e.to_string())?;
+            let cc = cc.unwrap_or_default();
+            for addr in to.split(',').chain(cc.split(',')) {
+                let addr = addr.trim();
+                if addr.is_empty() || !addr.contains('@') {
+                    continue;
+                }
+                by_email
+                    .entry(addr.to_lowercase())
+                    .or_insert(CachedContact {
+                        name: None,
+                        email: addr.to_string(),
+                    });
+            }
+        }
+
+        let mut contacts: Vec<_> = by_email.into_values().collect();
+        contacts.sort_by(|a, b| a.email.cmp(&b.email));
+        Ok(contacts)
     }
 
     pub async fn delete_account_cache(&self, account_id: &str) -> Result<(), String> {

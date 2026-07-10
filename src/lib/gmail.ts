@@ -87,11 +87,47 @@ interface Label {
 
 // --- header / body parsing ---
 
+// The Gmail API returns header values raw, so non-ASCII text arrives as RFC
+// 2047 encoded-words (=?charset?B|Q?data?=); decode them for display.
+function decodeRfc2047(value: string): string {
+  if (!value.includes("=?")) return value;
+  // Whitespace between adjacent encoded words is not part of the text.
+  const joined = value.replace(/(\?=)\s+(?==\?)/g, "$1");
+  return joined.replace(
+    /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,
+    (match, charset: string, enc: string, data: string) => {
+      try {
+        let bytes: Uint8Array;
+        if (enc.toLowerCase() === "b") {
+          bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        } else {
+          const out: number[] = [];
+          const text = data.replace(/_/g, " ");
+          for (let i = 0; i < text.length; i++) {
+            const hex = text.slice(i + 1, i + 3);
+            if (text[i] === "=" && /^[0-9a-f]{2}$/i.test(hex)) {
+              out.push(parseInt(hex, 16));
+              i += 2;
+            } else {
+              out.push(text.charCodeAt(i));
+            }
+          }
+          bytes = new Uint8Array(out);
+        }
+        // Charset may carry an RFC 2231 language tag ("utf-8*en").
+        return new TextDecoder(charset.split("*")[0]).decode(bytes);
+      } catch {
+        return match;
+      }
+    },
+  );
+}
+
 function header(msg: Message, name: string): string {
-  return (
+  return decodeRfc2047(
     msg.payload?.headers?.find(
       (h) => h.name.toLowerCase() === name.toLowerCase(),
-    )?.value ?? ""
+    )?.value ?? "",
   );
 }
 
@@ -600,6 +636,7 @@ export const signatureQuery = queryOptions({
 export interface Contact {
   name: string;
   email: string;
+  source: "google" | "icloud";
 }
 
 interface Person {
@@ -613,7 +650,7 @@ function toContacts(people: Person[] | undefined): Contact[] {
     return (p.emailAddresses ?? [])
       .map((e) => e.value?.trim())
       .filter((v): v is string => Boolean(v))
-      .map((email) => ({ name, email }));
+      .map((email) => ({ name, email, source: "google" as const }));
   });
 }
 
@@ -715,12 +752,28 @@ function stripNewlines(value: string): string {
   return value.replace(/[\r\n]+/g, " ").trim();
 }
 
+// Reply drafts carry decoded display names ("Ann Öberg <a@b>"); re-encode any
+// non-ASCII name so the outgoing To/Cc/Bcc headers stay 7-bit clean.
+function encodeAddressList(raw: string): string {
+  return raw
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      if (/^[\x20-\x7e]*$/.test(part)) return part;
+      const match = part.match(/^"?(.*?)"?\s*(<[^>]+>)$/);
+      if (!match || !match[1]) return part;
+      return `${encodeHeaderValue(match[1])} ${match[2]}`;
+    })
+    .join(", ");
+}
+
 // Build an RFC 822 message and send it. Gmail fills in From/Date/Message-ID.
 export async function sendMessage(msg: OutgoingMail) {
   const headers = [
-    `To: ${stripNewlines(msg.to)}`,
-    ...(msg.cc ? [`Cc: ${stripNewlines(msg.cc)}`] : []),
-    ...(msg.bcc ? [`Bcc: ${stripNewlines(msg.bcc)}`] : []),
+    `To: ${encodeAddressList(stripNewlines(msg.to))}`,
+    ...(msg.cc ? [`Cc: ${encodeAddressList(stripNewlines(msg.cc))}`] : []),
+    ...(msg.bcc ? [`Bcc: ${encodeAddressList(stripNewlines(msg.bcc))}`] : []),
     `Subject: ${encodeHeaderValue(stripNewlines(msg.subject))}`,
     ...(msg.inReplyTo ? [`In-Reply-To: ${stripNewlines(msg.inReplyTo)}`] : []),
     ...(msg.references ? [`References: ${stripNewlines(msg.references)}`] : []),

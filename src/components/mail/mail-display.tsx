@@ -35,6 +35,7 @@ import {
   type ComposeDraft,
 } from "@/components/mail/compose";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
+import { noDialogOpen, useMenuEvents } from "@/hooks/use-menu";
 import { useMailActions } from "@/hooks/use-mail-actions";
 import { mailBodyQuery, profileQuery, type MailBody } from "@/lib/gmail";
 import { icloudMessageBodyQuery, parseIcloudMailId } from "@/lib/icloud";
@@ -153,6 +154,11 @@ export function MailDisplay({
     a: () => mail && openReply(true),
     e: () => mail && act("archive", mail.id),
     "#": () => mail && setConfirmTrash(true),
+  });
+
+  useMenuEvents({
+    reply: () => noDialogOpen() && mail && openReply(false),
+    reply_all: () => noDialogOpen() && mail && openReply(true),
   });
 
   if (!mail) {

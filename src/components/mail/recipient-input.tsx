@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { Contact } from "@/lib/gmail";
@@ -109,7 +110,7 @@ export function RecipientInput({
               key={c.email}
               type="button"
               className={cn(
-                "flex w-full flex-col px-2.5 py-1.5 text-left text-sm",
+                "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm",
                 i === highlighted && "bg-accent text-accent-foreground",
               )}
               onMouseDown={(e) => {
@@ -118,16 +119,30 @@ export function RecipientInput({
               }}
               onMouseEnter={() => setHighlighted(i)}
             >
-              {c.name ? (
-                <>
-                  <span>{c.name}</span>
-                  <span className="text-muted-foreground text-xs">
-                    {c.email}
-                  </span>
-                </>
-              ) : (
-                <span>{c.email}</span>
-              )}
+              <span className="flex min-w-0 flex-col">
+                {c.name ? (
+                  <>
+                    <span className="truncate">{c.name}</span>
+                    <span className="text-muted-foreground truncate text-xs">
+                      {c.email}
+                    </span>
+                  </>
+                ) : (
+                  <span className="truncate">{c.email}</span>
+                )}
+              </span>
+              <Badge
+                variant="outline"
+                className="bg-background ml-auto shrink-0 gap-1 px-1.5 text-[10px]"
+              >
+                <span
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    c.source === "google" ? "bg-red-500" : "bg-sky-500",
+                  )}
+                />
+                {c.source === "google" ? "Gmail" : "iCloud"}
+              </Badge>
             </button>
           ))}
         </div>
