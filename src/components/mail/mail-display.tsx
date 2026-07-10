@@ -141,16 +141,11 @@ export function MailDisplay({
 
   const { act, isPending } = useMailActions(() => onDismiss());
 
-  // Archive/trash aren't implemented for iCloud (IMAP move) yet.
   useKeyboardShortcuts({
     r: () => mail && openReply(false),
     a: () => mail && openReply(true),
-    ...(isIcloud
-      ? {}
-      : {
-          e: () => mail && act("archive", mail.id),
-          "#": () => mail && setConfirmTrash(true),
-        }),
+    e: () => mail && act("archive", mail.id),
+    "#": () => mail && setConfirmTrash(true),
   });
 
   if (!mail) {
@@ -164,46 +159,42 @@ export function MailDisplay({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 p-2">
-        {!isIcloud && (
-          <>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={isPending}
-                  onClick={() => act("archive", mail.id)}
-                >
-                  <Archive className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                Archive <Kbd>e</Kbd>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={isPending}
-                  onClick={() => setConfirmTrash(true)}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                Move to trash <Kbd>#</Kbd>
-              </TooltipContent>
-            </Tooltip>
-          </>
-        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={isPending}
+              onClick={() => act("archive", mail.id)}
+            >
+              <Archive className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Archive <Kbd>e</Kbd>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={isPending}
+              onClick={() => setConfirmTrash(true)}
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Move to trash <Kbd>#</Kbd>
+          </TooltipContent>
+        </Tooltip>
         <AlertDialog open={confirmTrash} onOpenChange={setConfirmTrash}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Move to trash?</AlertDialogTitle>
               <AlertDialogDescription>
-                “{mail.subject}” moves to Trash. Gmail deletes trashed mail
+                “{mail.subject}” moves to Trash. Trashed mail is deleted
                 permanently after 30 days.
               </AlertDialogDescription>
             </AlertDialogHeader>

@@ -132,6 +132,19 @@ export function icloudMessageBodyQuery(accountId: string, folder: string, uid: n
   });
 }
 
+// Sidebar badge counts keyed by app folder id (inbox/junk unread, drafts total).
+export function icloudFolderCountsQuery(accountId: string) {
+  return queryOptions({
+    queryKey: ["icloud", accountId, "counts"],
+    queryFn: () =>
+      invoke<Record<string, number>>("icloud_folder_counts", {
+        account_id: accountId,
+      }),
+    enabled: !!accountId,
+    staleTime: 30_000,
+  });
+}
+
 // --- mutations ---
 
 export function icloudSendMessage(params: {
@@ -162,6 +175,20 @@ export function icloudSendMessage(params: {
 
 export function icloudMarkRead(accountId: string, folder: string, uid: number, read: boolean) {
   return invoke<void>("icloud_mark_read", { account_id: accountId, folder, uid, read });
+}
+
+export function icloudMoveMessage(
+  accountId: string,
+  folder: string,
+  uid: number,
+  targetFolder: string,
+) {
+  return invoke<void>("icloud_move_message", {
+    account_id: accountId,
+    folder,
+    uid,
+    target_folder: targetFolder,
+  });
 }
 
 // --- adapters to Mail view-model ---

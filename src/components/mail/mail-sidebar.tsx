@@ -77,6 +77,7 @@ import {
   tagsQuery,
   type Tag,
 } from "@/lib/gmail";
+import { icloudFolderCountsQuery } from "@/lib/icloud";
 import { invoke } from "@tauri-apps/api/core";
 
 const ICONS: Record<string, LucideIcon> = {
@@ -111,7 +112,12 @@ export function MailSidebar({
   const { accounts, activeAccount, activeAccountId, switchAccount, addGoogleAccount, addICloudAccount, removeAccount, isLoading } = useAccount();
   const isIcloud = activeAccount?.kind === "icloud";
   const { data: profile } = useQuery({ ...profileQuery, enabled: !isIcloud });
-  const { data: counts } = useQuery({ ...folderCountsQuery, enabled: !isIcloud });
+  const { data: gmailCounts } = useQuery({ ...folderCountsQuery, enabled: !isIcloud });
+  const { data: icloudCounts } = useQuery({
+    ...icloudFolderCountsQuery(activeAccount?.id ?? ""),
+    enabled: isIcloud,
+  });
+  const counts = isIcloud ? icloudCounts : gmailCounts;
   const { data: tags } = useQuery({ ...tagsQuery, enabled: !isIcloud });
   const { data: avatar } = useQuery({ ...avatarQuery, enabled: !isIcloud });
   const [newTagOpen, setNewTagOpen] = useState(false);

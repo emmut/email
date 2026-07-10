@@ -791,6 +791,33 @@ pub async fn icloud_mark_read(
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command(rename_all = "snake_case")]
+pub async fn icloud_move_message(
+    state: State<'_, AccountState>,
+    account_id: String,
+    folder: String,
+    uid: u32,
+    target_folder: String,
+) -> Result<(), String> {
+    let config = get_icloud_config(&state, &account_id).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        move_message_blocking(&config, &folder, uid, &target_folder)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn icloud_folder_counts(
+    state: State<'_, AccountState>,
+    account_id: String,
+) -> Result<std::collections::HashMap<String, u32>, String> {
+    let config = get_icloud_config(&state, &account_id).await?;
+    tauri::async_runtime::spawn_blocking(move || folder_counts_blocking(&config))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 async fn get_icloud_config(
     state: &State<'_, AccountState>,
     account_id: &str,
@@ -1080,6 +1107,58 @@ fn mark_read_blocking(
     res.map_err(|e| format!("store flags failed: {e}"))?;
     let _ = session.logout();
     Ok(())
+}
+
+fn move_message_blocking(
+    config: &IcloudAccountConfig,
+    folder: &str,
+    uid: u32,
+    target_folder: &str,
+) -> Result<(), String> {
+    let mut session = connect_imap(config)?;
+    session
+        .select(folder)
+        .map_err(|e| format!("select folder failed: {e}"))?;
+    let set = uid.to_string();
+    // iCloud supports UID MOVE; fall back to copy + delete + expunge otherwise.
+    if session.uid_mv(&set, target_folder).is_err() {
+        session
+            .uid_copy(&set, target_folder)
+            .map_err(|e| format!("copy failed: {e}"))?;
+        session
+            .uid_store(&set, "+FLAGS (\\Deleted)")
+            .map_err(|e| format!("delete flag failed: {e}"))?;
+        session
+            .expunge()
+            .map_err(|e| format!("expunge failed: {e}"))?;
+    }
+    let _ = session.logout();
+    Ok(())
+}
+
+/// Badge counts keyed by app folder id: unread for inbox/junk, totals for
+/// drafts (matching the Gmail sidebar semantics). Missing folders are skipped.
+fn folder_counts_blocking(
+    config: &IcloudAccountConfig,
+) -> Result<std::collections::HashMap<String, u32>, String> {
+    let mut session = connect_imap(config)?;
+    let mut counts = std::collections::HashMap::new();
+    for (id, mailbox, unread) in [
+        ("inbox", "INBOX", true),
+        ("junk", "Junk", true),
+        ("drafts", "Drafts", false),
+    ] {
+        if let Ok(status) = session.status(mailbox, "(MESSAGES UNSEEN)") {
+            let count = if unread {
+                status.unseen.unwrap_or(0)
+            } else {
+                status.exists
+            };
+            counts.insert(id.to_string(), count);
+        }
+    }
+    let _ = session.logout();
+    Ok(counts)
 }
 
 fn smtp_send_blocking(

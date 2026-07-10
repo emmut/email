@@ -36,6 +36,8 @@ pub fn run() {
             account::icloud_fetch_message,
             account::icloud_send_message,
             account::icloud_mark_read,
+            account::icloud_move_message,
+            account::icloud_folder_counts,
             account::cache_list_messages,
             account::cache_get_message,
             account::cache_mark_read,

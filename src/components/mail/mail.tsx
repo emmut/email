@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, SquarePen } from "lucide-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
 import {
   ResizableHandle,
@@ -28,21 +28,14 @@ import { MailDisplay } from "@/components/mail/mail-display";
 import type { Mail as MailItem } from "@/components/mail/data";
 import { ShortcutsHelp } from "@/components/mail/shortcuts-help";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
+import { useMailActions } from "@/hooks/use-mail-actions";
 import {
   mailListQuery,
-  markRead,
   tagIdFromFolder,
   tagsQuery,
   useGmailSync,
 } from "@/lib/gmail";
-import {
-  icloudFolderName,
-  icloudMarkRead,
-  icloudMessagesQuery,
-  parseIcloudMailId,
-  toMail,
-  type IcloudMessageSummary,
-} from "@/lib/icloud";
+import { icloudFolderName, icloudMessagesQuery, toMail } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
 
 export function Mail() {
@@ -67,7 +60,6 @@ export function Mail() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const queryClient = useQueryClient();
   const gmailList = mailListQuery(activeFolder, debouncedSearch);
   const gmailQuery = useQuery({ ...gmailList, enabled: !isIcloud });
   const icloudList = icloudMessagesQuery(
@@ -95,35 +87,8 @@ export function Mail() {
     ? icloudQuery
     : gmailQuery;
 
-  const markReadMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const ref = parseIcloudMailId(id);
-      if (ref && activeAccount) {
-        await icloudMarkRead(activeAccount.id, ref.folder, ref.uid, true);
-      } else {
-        await markRead(id);
-      }
-    },
-    onMutate: (id: string) => {
-      const ref = parseIcloudMailId(id);
-      if (ref) {
-        queryClient.setQueryData(
-          icloudList.queryKey,
-          (old: IcloudMessageSummary[] | undefined) =>
-            old?.map((m) => (m.uid === ref.uid ? { ...m, read: true } : m)),
-        );
-      } else {
-        queryClient.setQueryData(gmailList.queryKey, (old: MailItem[] | undefined) =>
-          old?.map((m) => (m.id === id ? { ...m, read: true } : m)),
-        );
-      }
-    },
-    onSuccess: (_data, id) => {
-      if (!parseIcloudMailId(id)) {
-        queryClient.invalidateQueries({ queryKey: ["gmail", "counts"] });
-      }
-    },
-  });
+  // Shared optimistic mail actions (provider-aware: Gmail or iCloud).
+  const { act } = useMailActions();
 
   const selectFolder = (folder: string) => {
     setActiveFolder(folder);
@@ -138,7 +103,7 @@ export function Mail() {
       if (tab === "unread") {
         setKeptReadIds((prev) => new Set(prev).add(id));
       }
-      markReadMutation.mutate(id);
+      act("read", id);
     }
   };
 
