@@ -1,6 +1,7 @@
 import DOMPurify from "dompurify";
 import { invoke } from "@tauri-apps/api/core";
 import { queryOptions } from "@tanstack/react-query";
+import { cacheGet, cachePut } from "@/lib/cache";
 import type { Mail } from "@/components/mail/data";
 import type { MailBody } from "@/lib/gmail";
 
@@ -169,10 +170,23 @@ export function icloudMessageBodyQuery(accountId: string, folder: string, uid: n
 export function icloudFolderCountsQuery(accountId: string) {
   return queryOptions({
     queryKey: ["icloud", accountId, "counts"],
-    queryFn: () =>
-      invoke<Record<string, number>>("icloud_folder_counts", {
-        account_id: accountId,
-      }),
+    queryFn: async (): Promise<Record<string, number>> => {
+      try {
+        const counts = await invoke<Record<string, number>>(
+          "icloud_folder_counts",
+          { account_id: accountId },
+        );
+        cachePut(`icloud:counts:${accountId}`, counts);
+        return counts;
+      } catch (err) {
+        // Offline — fall back to the last known counts.
+        const cached = await cacheGet<Record<string, number>>(
+          `icloud:counts:${accountId}`,
+        );
+        if (cached) return cached;
+        throw err;
+      }
+    },
     enabled: !!accountId,
     staleTime: 30_000,
   });

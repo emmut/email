@@ -107,6 +107,16 @@ impl CacheDb {
                 json TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            -- Offline write queue: actions taken while offline, replayed
+            -- against the provider when connectivity returns.
+            CREATE TABLE IF NOT EXISTS pending_ops (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
             "#,
         )
         .map_err(|e| e.to_string())?;
@@ -287,6 +297,56 @@ impl CacheDb {
         Ok(())
     }
 
+    pub async fn enqueue_op(&self, kind: &str, payload: &str) -> Result<i64, String> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO pending_ops (kind, payload, created_at) VALUES (?1, ?2, ?3)",
+            params![kind, payload, Utc::now().to_rfc3339()],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub async fn list_ops(&self) -> Result<Vec<PendingOp>, String> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, kind, payload, attempts, created_at FROM pending_ops ORDER BY id ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let ops = stmt
+            .query_map([], |row| {
+                Ok(PendingOp {
+                    id: row.get(0)?,
+                    kind: row.get(1)?,
+                    payload: row.get(2)?,
+                    attempts: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(ops)
+    }
+
+    pub async fn delete_op(&self, id: i64) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        conn.execute("DELETE FROM pending_ops WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn bump_op(&self, id: i64) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE pending_ops SET attempts = attempts + 1 WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub async fn delete_kv_prefix(&self, prefix: &str) -> Result<(), String> {
         let conn = self.conn.lock().await;
         conn.execute(
@@ -396,4 +456,13 @@ pub struct CachedMessage {
 pub struct SyncState {
     pub last_uid: u32,
     pub last_synced_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingOp {
+    pub id: i64,
+    pub kind: String,
+    pub payload: String,
+    pub attempts: i64,
+    pub created_at: String,
 }

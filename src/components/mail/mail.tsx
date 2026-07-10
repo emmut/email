@@ -43,6 +43,7 @@ import {
   toMail,
 } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
+import { useOfflineQueue } from "@/lib/offline";
 
 export function Mail() {
   const [activeFolder, setActiveFolder] = useState("inbox");
@@ -60,6 +61,7 @@ export function Mail() {
   const isIcloud = activeAccount?.kind === "icloud";
 
   useGmailSync(!isIcloud);
+  useOfflineQueue();
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);

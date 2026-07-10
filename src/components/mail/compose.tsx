@@ -29,6 +29,11 @@ import {
   type OutgoingMail,
 } from "@/lib/gmail";
 import { icloudSendMessage } from "@/lib/icloud";
+import {
+  isNetworkError,
+  queueGmailSend,
+  queueIcloudSend,
+} from "@/lib/offline";
 
 export interface ComposeDraft {
   to?: string;
@@ -158,8 +163,8 @@ function ComposeFields({
     mutationFn: async (msg: OutgoingMail) => {
       const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
       if (selectedAccount?.kind === "icloud") {
-        // Send via iCloud IMAP/SMTP
-        await icloudSendMessage({
+        // Send via iCloud SMTP
+        const params = {
           accountId: selectedAccount.id,
           fromEmail: selectedAccount.email,
           to: msg.to,
@@ -170,10 +175,22 @@ function ComposeFields({
           bodyHtml: msg.html,
           inReplyTo: msg.inReplyTo,
           references: msg.references,
-        });
+        };
+        try {
+          await icloudSendMessage(params);
+        } catch (err) {
+          // Offline: park it in the outbox; it sends when connectivity returns.
+          if (!isNetworkError(err)) throw err;
+          await queueIcloudSend(params);
+        }
       } else {
         // Send via Gmail API (default)
-        await sendMessage(msg);
+        try {
+          await sendMessage(msg);
+        } catch (err) {
+          if (!isNetworkError(err)) throw err;
+          await queueGmailSend(msg);
+        }
       }
     },
     onSuccess: () => {

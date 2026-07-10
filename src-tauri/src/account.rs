@@ -497,8 +497,11 @@ pub async fn remove_account(
         }
     }
 
-    // Drop any cached mail for the account
+    // Drop any cached mail (and per-account kv entries) for the account
     cache.delete_account_cache(&account_id).await?;
+    cache
+        .delete_kv_prefix(&format!("icloud:counts:{account_id}"))
+        .await?;
 
     Ok(())
 }
@@ -969,9 +972,15 @@ fn list_messages_blocking(
 /// UIDs no longer on the server (deleted or moved elsewhere).
 struct IcloudSyncDelta {
     new_messages: Vec<IcloudMessageSummary>,
+    /// Prefetched full bodies for the newest new messages: (uid, text, html).
+    bodies: Vec<(u32, String, Option<String>)>,
     flag_updates: Vec<(u32, Vec<String>, bool)>,
     vanished: Vec<u32>,
 }
+
+/// How many new messages get their body prefetched per sync pass (offline
+/// reading without having opened them).
+const BODY_PREFETCH: usize = 10;
 
 fn sync_messages_blocking(
     config: &IcloudAccountConfig,
@@ -1020,6 +1029,26 @@ fn sync_messages_blocking(
         new_messages.reverse();
     }
 
+    // Prefetch bodies for the newest few new messages (BODY.PEEK keeps them
+    // unread) so they're readable offline without ever being opened.
+    let mut bodies = Vec::new();
+    if !new_messages.is_empty() {
+        let set: String = new_messages
+            .iter()
+            .take(BODY_PREFETCH)
+            .map(|m| m.uid.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        if let Ok(fetches) = session.uid_fetch(&set, "(UID BODY.PEEK[])") {
+            for fetch in fetches.iter() {
+                if let (Some(uid), Some(raw)) = (fetch.uid, fetch.body()) {
+                    let (text, html) = parse_body(raw);
+                    bodies.push((uid, text, html));
+                }
+            }
+        }
+    }
+
     // Refresh flags for what we already have cached (read state can change
     // from other devices) and detect messages that vanished from the folder.
     let mut flag_updates = Vec::new();
@@ -1051,6 +1080,7 @@ fn sync_messages_blocking(
     let _ = session.logout();
     Ok(IcloudSyncDelta {
         new_messages,
+        bodies,
         flag_updates,
         vanished,
     })
@@ -1453,23 +1483,31 @@ pub async fn cache_sync_icloud(
     .await
     .map_err(|e| e.to_string())??;
 
+    let bodies: std::collections::HashMap<u32, (String, Option<String>)> = delta
+        .bodies
+        .into_iter()
+        .map(|(uid, text, html)| (uid, (text, html)))
+        .collect();
     let cached: Vec<crate::db::CachedMessage> = delta
         .new_messages
         .into_iter()
-        .map(|m| crate::db::CachedMessage {
-            uid: m.uid,
-            message_id: m.message_id,
-            from_name: m.from_name,
-            from_email: m.from_email,
-            to: m.to,
-            cc: None,
-            subject: m.subject,
-            snippet: m.snippet,
-            body_text: String::new(),
-            body_html: None,
-            date: m.date,
-            flags: m.flags,
-            read: m.read,
+        .map(|m| {
+            let (body_text, body_html) = bodies.get(&m.uid).cloned().unwrap_or_default();
+            crate::db::CachedMessage {
+                uid: m.uid,
+                message_id: m.message_id,
+                from_name: m.from_name,
+                from_email: m.from_email,
+                to: m.to,
+                cc: None,
+                subject: m.subject,
+                snippet: snippet_of(&body_text),
+                body_text,
+                body_html,
+                date: m.date,
+                flags: m.flags,
+                read: m.read,
+            }
         })
         .collect();
 
@@ -1546,6 +1584,51 @@ pub async fn cache_delete_prefix(
     prefix: String,
 ) -> Result<(), String> {
     cache.delete_kv_prefix(&prefix).await
+}
+
+/// Drop one message from the local cache (offline archive/trash bookkeeping).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn cache_remove_message(
+    cache: State<'_, crate::db::CacheDb>,
+    account_id: String,
+    folder: String,
+    uid: u32,
+) -> Result<(), String> {
+    cache.delete_messages(&account_id, &folder, &[uid]).await
+}
+
+// --- offline operation queue ---
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn ops_enqueue(
+    cache: State<'_, crate::db::CacheDb>,
+    kind: String,
+    payload: String,
+) -> Result<i64, String> {
+    cache.enqueue_op(&kind, &payload).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn ops_list(
+    cache: State<'_, crate::db::CacheDb>,
+) -> Result<Vec<crate::db::PendingOp>, String> {
+    cache.list_ops().await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn ops_delete(
+    cache: State<'_, crate::db::CacheDb>,
+    id: i64,
+) -> Result<(), String> {
+    cache.delete_op(id).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn ops_bump(
+    cache: State<'_, crate::db::CacheDb>,
+    id: i64,
+) -> Result<(), String> {
+    cache.bump_op(id).await
 }
 
 #[tauri::command(rename_all = "snake_case")]

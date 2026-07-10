@@ -6,6 +6,7 @@ import {
   archiveMessage,
   markRead,
   markUnread,
+  persistGmailListCaches,
   setMessageTag,
   tagFolderId,
   trashMessage,
@@ -18,6 +19,11 @@ import {
   parseIcloudMailId,
   type IcloudMessageSummary,
 } from "@/lib/icloud";
+import {
+  isNetworkError,
+  queueGmailAction,
+  queueIcloudAction,
+} from "@/lib/offline";
 
 export type MailAction = "archive" | "trash" | "read" | "unread";
 
@@ -49,47 +55,63 @@ export function useMailActions(onRemoved?: (id: string) => void) {
     mutationFn: async ({ action, id }: { action: MailAction; id: string }) => {
       const ref = parseIcloudMailId(id);
       if (ref && activeAccount) {
-        switch (action) {
-          case "archive":
-            await icloudMoveMessage(
-              activeAccount.id,
-              ref.folder,
-              ref.uid,
-              ICLOUD_FOLDER_NAMES.archive,
-            );
-            return;
-          case "trash":
-            await icloudMoveMessage(
-              activeAccount.id,
-              ref.folder,
-              ref.uid,
-              ICLOUD_FOLDER_NAMES.trash,
-            );
-            return;
-          case "read":
-          case "unread":
-            await icloudMarkRead(
-              activeAccount.id,
-              ref.folder,
-              ref.uid,
-              action === "read",
-            );
-            return;
+        try {
+          switch (action) {
+            case "archive":
+              await icloudMoveMessage(
+                activeAccount.id,
+                ref.folder,
+                ref.uid,
+                ICLOUD_FOLDER_NAMES.archive,
+              );
+              return;
+            case "trash":
+              await icloudMoveMessage(
+                activeAccount.id,
+                ref.folder,
+                ref.uid,
+                ICLOUD_FOLDER_NAMES.trash,
+              );
+              return;
+            case "read":
+            case "unread":
+              await icloudMarkRead(
+                activeAccount.id,
+                ref.folder,
+                ref.uid,
+                action === "read",
+              );
+              return;
+          }
+        } catch (err) {
+          // Offline: journal the action (also updates the SQLite cache) and
+          // keep the optimistic UI — it replays when connectivity returns.
+          if (!isNetworkError(err)) throw err;
+          await queueIcloudAction(activeAccount.id, ref.folder, ref.uid, action);
+          return;
         }
       }
-      switch (action) {
-        case "archive":
-          await archiveMessage(id);
-          return;
-        case "trash":
-          await trashMessage(id);
-          return;
-        case "read":
-          await markRead(id);
-          return;
-        case "unread":
-          await markUnread(id);
-          return;
+      try {
+        switch (action) {
+          case "archive":
+            await archiveMessage(id);
+            return;
+          case "trash":
+            await trashMessage(id);
+            return;
+          case "read":
+            await markRead(id);
+            return;
+          case "unread":
+            await markUnread(id);
+            return;
+        }
+      } catch (err) {
+        if (!isNetworkError(err)) throw err;
+        await queueGmailAction(id, action);
+        // Persist the optimistically-updated listings so a restart while
+        // still offline shows the same state.
+        persistGmailListCaches(queryClient);
       }
     },
     onMutate: async ({ action, id }) => {

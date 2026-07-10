@@ -1,32 +1,30 @@
 import { useEffect, useRef } from "react";
 import DOMPurify from "dompurify";
-import { invoke } from "@tauri-apps/api/core";
 import { fetch } from "@tauri-apps/plugin-http";
-import { queryOptions, useQueryClient } from "@tanstack/react-query";
+import {
+  queryOptions,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { getAccessToken } from "@/lib/auth";
+import { cacheDeletePrefix, cacheGet, cachePut } from "@/lib/cache";
 import type { Mail } from "@/components/mail/data";
 
-// --- local persistent cache (SQLite key-value, via the Rust backend) ---
-//
-// Lists and bodies are cached as JSON so the UI paints instantly on startup
-// and bodies read offline. Cache failures are never surfaced — the network
-// path is always authoritative.
-
-async function cacheGet<T>(key: string): Promise<T | null> {
-  try {
-    const json = await invoke<string | null>("cache_get_json", { key });
-    return json ? (JSON.parse(json) as T) : null;
-  } catch {
-    return null;
-  }
-}
-
-function cachePut(key: string, value: unknown) {
-  invoke("cache_put_json", { key, json: JSON.stringify(value) }).catch(() => {});
-}
-
 export function clearGmailCache() {
-  return invoke("cache_delete_prefix", { prefix: "gmail:" }).catch(() => {});
+  return cacheDeletePrefix("gmail:");
+}
+
+// Write the current in-memory folder listings through to SQLite — used after
+// offline optimistic updates so a restart shows the same state.
+export function persistGmailListCaches(queryClient: QueryClient) {
+  const lists = queryClient.getQueriesData<Mail[]>({
+    queryKey: ["gmail", "list"],
+  });
+  for (const [key, data] of lists) {
+    if (key.length === 4 && key[3] === "" && data) {
+      cachePut(`gmail:list:${key[2] as string}`, data);
+    }
+  }
 }
 
 const BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -335,11 +333,27 @@ export function mailListQuery(folder: string, search: string) {
         result = messages.map((m) => toMail(m, names));
       }
       // Persist plain folder listings (not ad-hoc searches) for instant startup.
-      if (!search) cachePut(`gmail:list:${folder}`, result);
+      if (!search) {
+        cachePut(`gmail:list:${folder}`, result);
+        // Fire-and-forget: warm the body cache for the newest messages so
+        // they're readable offline without ever having been opened.
+        void prefetchBodies(result.slice(0, 10));
+      }
       return result;
     },
     staleTime: 30_000,
   });
+}
+
+async function prefetchBodies(mails: Mail[]) {
+  for (const mail of mails) {
+    try {
+      if (await cacheGet<MailBody>(`gmail:body:${mail.id}`)) continue;
+      await fetchMailBody(mail.id); // caches as a side effect
+    } catch {
+      return; // network gone — stop quietly
+    }
+  }
 }
 
 // Cache-only folder listing (null on cache miss) — painted while the network
@@ -352,30 +366,33 @@ export function gmailCachedListQuery(folder: string) {
   });
 }
 
+// Bodies are immutable — serve from the local cache when present, and cache
+// on first fetch (also used by the list prefetcher).
+async function fetchMailBody(id: string): Promise<MailBody> {
+  const cached = await cacheGet<MailBody>(`gmail:body:${id}`);
+  if (cached) return cached;
+  const msg = await gmail<Message>(`/messages/${id}?format=full`);
+  const from = header(msg, "From");
+  const body: MailBody = {
+    ...extractBody(msg.payload),
+    threadId: msg.threadId,
+    subject: header(msg, "Subject"),
+    from,
+    replyTo: header(msg, "Reply-To") || from,
+    to: header(msg, "To"),
+    cc: header(msg, "Cc"),
+    messageId: header(msg, "Message-ID"),
+    references: header(msg, "References"),
+    date: header(msg, "Date"),
+  };
+  cachePut(`gmail:body:${id}`, body);
+  return body;
+}
+
 export function mailBodyQuery(id: string) {
   return queryOptions({
     queryKey: ["gmail", "message", id],
-    queryFn: async (): Promise<MailBody> => {
-      // Bodies are immutable — serve from the local cache when present.
-      const cached = await cacheGet<MailBody>(`gmail:body:${id}`);
-      if (cached) return cached;
-      const msg = await gmail<Message>(`/messages/${id}?format=full`);
-      const from = header(msg, "From");
-      const body: MailBody = {
-        ...extractBody(msg.payload),
-        threadId: msg.threadId,
-        subject: header(msg, "Subject"),
-        from,
-        replyTo: header(msg, "Reply-To") || from,
-        to: header(msg, "To"),
-        cc: header(msg, "Cc"),
-        messageId: header(msg, "Message-ID"),
-        references: header(msg, "References"),
-        date: header(msg, "Date"),
-      };
-      cachePut(`gmail:body:${id}`, body);
-      return body;
-    },
+    queryFn: () => fetchMailBody(id),
     staleTime: Infinity,
   });
 }
@@ -384,16 +401,25 @@ export function mailBodyQuery(id: string) {
 export const folderCountsQuery = queryOptions({
   queryKey: ["gmail", "counts"],
   queryFn: async (): Promise<Record<string, number>> => {
-    const [inbox, drafts, junk] = await Promise.all([
-      gmail<Label>("/labels/INBOX"),
-      gmail<Label>("/labels/DRAFT"),
-      gmail<Label>("/labels/SPAM"),
-    ]);
-    return {
-      inbox: inbox.messagesUnread ?? 0,
-      drafts: drafts.messagesTotal ?? 0,
-      junk: junk.messagesUnread ?? 0,
-    };
+    try {
+      const [inbox, drafts, junk] = await Promise.all([
+        gmail<Label>("/labels/INBOX"),
+        gmail<Label>("/labels/DRAFT"),
+        gmail<Label>("/labels/SPAM"),
+      ]);
+      const counts = {
+        inbox: inbox.messagesUnread ?? 0,
+        drafts: drafts.messagesTotal ?? 0,
+        junk: junk.messagesUnread ?? 0,
+      };
+      cachePut("gmail:counts", counts);
+      return counts;
+    } catch (err) {
+      // Offline — fall back to the last known counts.
+      const cached = await cacheGet<Record<string, number>>("gmail:counts");
+      if (cached) return cached;
+      throw err;
+    }
   },
   staleTime: 30_000,
 });
