@@ -7,8 +7,10 @@ import {
   applyGmailLabelChange,
   archiveMessage,
   deleteMessage,
+  junkMessage,
   markRead,
   markUnread,
+  notJunkMessage,
   removeGmailFromCache,
   setMessageTag,
   tagFolderId,
@@ -18,6 +20,7 @@ import {
 import {
   ICLOUD_FOLDER_NAMES,
   icloudDeleteMessage,
+  icloudMarkJunk,
   icloudMarkRead,
   icloudMoveMessage,
   parseIcloudMailId,
@@ -29,7 +32,18 @@ import {
   queueIcloudAction,
 } from "@/lib/offline";
 
-export type MailAction = "archive" | "trash" | "read" | "unread" | "delete";
+export type MailAction =
+  | "archive"
+  | "trash"
+  | "read"
+  | "unread"
+  | "delete"
+  | "junk"
+  | "notJunk";
+
+// The junk verdict a view offers: report as junk, rescue from the junk
+// folder, or nothing at all (drafts are outgoing mail — no verdict applies).
+export type JunkAction = Extract<MailAction, "junk" | "notJunk"> | null;
 
 // How an action changes a folder's badge. The drafts badge counts all mail,
 // the others count unread mail.
@@ -45,6 +59,8 @@ function countDelta(action: MailAction, folder: string, read: boolean): number {
     case "archive":
     case "trash":
     case "delete":
+    case "junk":
+    case "notJunk":
       return read ? 0 : -1;
   }
 }
@@ -87,6 +103,15 @@ export function useMailActions(onRemoved?: (id: string) => void) {
                 action === "read",
               );
               return;
+            case "junk":
+            case "notJunk":
+              await icloudMarkJunk(
+                activeAccount.id,
+                ref.folder,
+                ref.uid,
+                action === "junk",
+              );
+              return;
             case "delete":
               await icloudDeleteMessage(activeAccount.id, ref.folder, ref.uid);
               return;
@@ -113,6 +138,12 @@ export function useMailActions(onRemoved?: (id: string) => void) {
             return;
           case "unread":
             await markUnread(id);
+            return;
+          case "junk":
+            await junkMessage(id);
+            return;
+          case "notJunk":
+            await notJunkMessage(id);
             return;
           case "delete":
             await deleteMessage(id);

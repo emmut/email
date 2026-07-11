@@ -29,11 +29,14 @@ const handlers = () => ({
   onEmptyTrash: vi.fn(),
 });
 
-function renderPalette(selected = mail({ read: true })) {
+function renderPalette(
+  selected = mail({ read: true }),
+  junkAction: "junk" | "notJunk" | null = "junk",
+) {
   const h = handlers();
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <CommandPalette open selected={selected} {...h} />
+      <CommandPalette open selected={selected} junkAction={junkAction} {...h} />
     </QueryClientProvider>,
   );
   return h;
@@ -76,11 +79,29 @@ describe("CommandPalette", () => {
     const h = handlers();
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <CommandPalette open selected={null} {...h} />
+        <CommandPalette open selected={null} junkAction="junk" {...h} />
       </QueryClientProvider>,
     );
     expect(screen.queryByText("Mark as unread")).not.toBeInTheDocument();
     expect(screen.queryByText("Move to trash")).not.toBeInTheDocument();
+  });
+
+  it("shows Mark as junk and runs it", () => {
+    const h = renderPalette(mail({ id: "m9", read: true }));
+    expect(screen.queryByText("Mark as not junk")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Mark as junk"));
+    expect(h.onAct).toHaveBeenCalledWith("junk", "m9");
+  });
+
+  it("shows Mark as not junk inside the junk folder", () => {
+    const h = renderPalette(mail({ id: "m9", read: true }), "notJunk");
+    fireEvent.click(screen.getByText("Mark as not junk"));
+    expect(h.onAct).toHaveBeenCalledWith("notJunk", "m9");
+  });
+
+  it("hides the junk action where none applies (drafts)", () => {
+    renderPalette(mail({ id: "m9", read: true }), null);
+    expect(screen.queryByText(/mark as (not )?junk/i)).not.toBeInTheDocument();
   });
 
   it("empty trash asks the host for confirmation flow", () => {

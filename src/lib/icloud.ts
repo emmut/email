@@ -280,6 +280,18 @@ export function icloudSendMessage(params: {
   });
 }
 
+// Save an unsent message into the Drafts mailbox (IMAP APPEND, \Draft flag).
+// `mime` is the complete RFC 822 message, built by the shared frontend
+// builder so Gmail and iCloud drafts have identical content.
+export function icloudSaveDraft(accountId: string, mime: string) {
+  return invoke<void>("icloud_append_message", {
+    account_id: accountId,
+    folder: ICLOUD_FOLDER_NAMES.drafts,
+    content: mime,
+    draft: true,
+  });
+}
+
 export function icloudMarkRead(accountId: string, folder: string, uid: number, read: boolean) {
   return invoke<void>("icloud_mark_read", { account_id: accountId, folder, uid, read });
 }
@@ -295,6 +307,23 @@ export function icloudMoveMessage(
     folder,
     uid,
     target_folder: targetFolder,
+  });
+}
+
+// Junk verdict: stores Apple Mail's $Junk/$NotJunk keywords and moves the
+// message to Junk (or back to Inbox) in one IMAP round trip.
+export function icloudMarkJunk(
+  accountId: string,
+  folder: string,
+  uid: number,
+  junk: boolean,
+) {
+  return invoke<void>("icloud_mark_junk", {
+    account_id: accountId,
+    folder,
+    uid,
+    junk,
+    target_folder: junk ? ICLOUD_FOLDER_NAMES.junk : ICLOUD_FOLDER_NAMES.inbox,
   });
 }
 

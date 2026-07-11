@@ -970,6 +970,32 @@ pub async fn icloud_move_message(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn icloud_mark_junk(
+    state: State<'_, AccountState>,
+    cache: State<'_, crate::db::CacheDb>,
+    pool: State<'_, ImapPool>,
+    account_id: String,
+    folder: String,
+    uid: u32,
+    junk: bool,
+    target_folder: String,
+) -> Result<(), String> {
+    let config = get_icloud_config(&state, &account_id).await?;
+    let imap = pool.0.clone();
+    let folder_clone = folder.clone();
+    let account = account_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_imap(&imap, &account, &config, |s| {
+            mark_junk_blocking(s, &folder_clone, uid, junk, &target_folder)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let _ = cache.delete_messages(&account_id, &folder, &[uid]).await;
+    Ok(())
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_delete_message(
     state: State<'_, AccountState>,
     cache: State<'_, crate::db::CacheDb>,
@@ -991,6 +1017,38 @@ pub async fn icloud_delete_message(
     .map_err(|e| e.to_string())??;
     let _ = cache.delete_messages(&account_id, &folder, &[uid]).await;
     Ok(())
+}
+
+/// Store a fully built RFC 822 message into a mailbox (drafts get \Draft
+/// plus \Seen so they don't count as unread mail).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn icloud_append_message(
+    state: State<'_, AccountState>,
+    pool: State<'_, ImapPool>,
+    account_id: String,
+    folder: String,
+    content: String,
+    draft: bool,
+) -> Result<(), String> {
+    let config = get_icloud_config(&state, &account_id).await?;
+    let pool = pool.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_imap(&pool, &account_id, &config, |s| {
+            let mailbox = crate::utf7::encode(&folder);
+            let res = if draft {
+                s.append_with_flags(
+                    mailbox,
+                    content.as_bytes(),
+                    &[imap::types::Flag::Draft, imap::types::Flag::Seen],
+                )
+            } else {
+                s.append(mailbox, content.as_bytes())
+            };
+            res.map_err(|e| format!("append failed: {e}"))
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1445,6 +1503,30 @@ fn move_message_blocking(
             .map_err(|e| format!("expunge failed: {e}"))?;
     }
     Ok(())
+}
+
+fn mark_junk_blocking(
+    session: &mut ImapSession,
+    folder: &str,
+    uid: u32,
+    junk: bool,
+    target_folder: &str,
+) -> Result<(), String> {
+    session
+        .select(crate::utf7::encode(folder))
+        .map_err(|e| format!("select folder failed: {e}"))?;
+    let set = uid.to_string();
+    // Apple Mail's convention: the $Junk/$NotJunk keywords carry the
+    // classification so other clients (and Apple's filter) see the verdict,
+    // not just a folder move. Best effort — the move is the real effect.
+    let (add, remove) = if junk {
+        ("$Junk", "$NotJunk")
+    } else {
+        ("$NotJunk", "$Junk")
+    };
+    let _ = session.uid_store(&set, format!("+FLAGS ({add})"));
+    let _ = session.uid_store(&set, format!("-FLAGS ({remove})"));
+    move_message_blocking(session, folder, uid, target_folder)
 }
 
 fn delete_message_blocking(

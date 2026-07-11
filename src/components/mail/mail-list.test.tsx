@@ -47,6 +47,7 @@ function renderList(
         checkedIds={new Set()}
         onToggleCheck={onToggleCheck}
         inTrash={false}
+        junkAction="junk"
         {...props}
       />
     </QueryClientProvider>,
@@ -124,6 +125,28 @@ describe("MailList", () => {
     fireEvent.contextMenu(row("Alice"));
     expect(screen.getByText("Archive")).toBeInTheDocument(); // menu is open
     expect(screen.queryByText("Tags")).not.toBeInTheDocument();
+  });
+
+  it("marks a message as junk from the context menu", () => {
+    renderList();
+    fireEvent.contextMenu(row("Alice"));
+    fireEvent.click(screen.getByText("Mark as junk"));
+    expect(spies.act).toHaveBeenCalledWith("junk", "m1");
+  });
+
+  it("offers Mark as not junk inside the junk folder", () => {
+    renderList({ junkAction: "notJunk" });
+    fireEvent.contextMenu(row("Bob"));
+    expect(screen.queryByText("Mark as junk")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Mark as not junk"));
+    expect(spies.act).toHaveBeenCalledWith("notJunk", "m2");
+  });
+
+  it("offers no junk action where none applies (drafts)", () => {
+    renderList({ junkAction: null });
+    fireEvent.contextMenu(row("Bob"));
+    expect(screen.getByText("Archive")).toBeInTheDocument(); // menu is open
+    expect(screen.queryByText(/mark as (not )?junk/i)).not.toBeInTheDocument();
   });
 
   it("reflects checked state on the checkboxes", () => {

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { htmlToPlain, tidySignature } from "@/components/mail/compose";
+import {
+  hasUnsavedChanges,
+  htmlToPlain,
+  initialHeaderFields,
+  tidySignature,
+} from "@/components/mail/compose";
 
 describe("tidySignature", () => {
   it("strips trailing <br>s inside blocks", () => {
@@ -22,6 +27,36 @@ describe("tidySignature", () => {
 
   it("passes plain signatures through", () => {
     expect(tidySignature("<div>Just me</div>")).toBe("<div>Just me</div>");
+  });
+});
+
+describe("hasUnsavedChanges", () => {
+  const replyDraft = { to: "ann@x.com", subject: "Re: hi" };
+
+  it("is pristine right after opening", () => {
+    expect(
+      hasUnsavedChanges(replyDraft, initialHeaderFields(replyDraft), false),
+    ).toBe(false);
+  });
+
+  it("detects an edited header field", () => {
+    const fields = { ...initialHeaderFields(replyDraft), cc: "bob@x.com" };
+    expect(hasUnsavedChanges(replyDraft, fields, false)).toBe(true);
+  });
+
+  it("detects an edited body regardless of headers", () => {
+    expect(
+      hasUnsavedChanges(replyDraft, initialHeaderFields(replyDraft), true),
+    ).toBe(true);
+  });
+
+  it("does not treat prefilled reply fields as edits", () => {
+    expect(initialHeaderFields(replyDraft)).toEqual({
+      to: "ann@x.com",
+      cc: "",
+      bcc: "",
+      subject: "Re: hi",
+    });
   });
 });
 

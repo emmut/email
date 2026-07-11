@@ -12,6 +12,8 @@ const gmailApi = vi.hoisted(() => ({
   markUnread: vi.fn(),
   archiveMessage: vi.fn(),
   trashMessage: vi.fn(),
+  junkMessage: vi.fn(),
+  notJunkMessage: vi.fn(),
   deleteMessage: vi.fn(),
   applyGmailActionToCache: vi.fn(),
   removeGmailFromCache: vi.fn(),
@@ -117,6 +119,32 @@ describe("useMailActions (Gmail)", () => {
 
     await waitFor(() =>
       expect(queue.queueGmailAction).toHaveBeenCalledWith("m1", "archive"),
+    );
+  });
+
+  it("junk removes the mail from the list and mirrors to the cache", async () => {
+    const removed = vi.fn();
+    const { client, result } = setup(removed);
+    result.current.act("junk", "m1");
+
+    await waitFor(() => {
+      expect(client.getQueryData<Mail[]>(LIST_KEY)!.map((m) => m.id)).toEqual([
+        "m2",
+      ]);
+    });
+    expect(removed).toHaveBeenCalledWith("m1");
+    await waitFor(() =>
+      expect(gmailApi.junkMessage).toHaveBeenCalledWith("m1"),
+    );
+    expect(gmailApi.applyGmailActionToCache).toHaveBeenCalledWith("m1", "junk");
+  });
+
+  it("not junk calls the SPAM-removal API", async () => {
+    const { result } = setup();
+    result.current.act("notJunk", "m2");
+
+    await waitFor(() =>
+      expect(gmailApi.notJunkMessage).toHaveBeenCalledWith("m2"),
     );
   });
 

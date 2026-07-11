@@ -4,6 +4,8 @@ import {
   Folder as FolderIcon,
   MailOpen,
   MailX,
+  ShieldAlert,
+  ShieldCheck,
   Tag as TagIcon,
   Trash2,
 } from "lucide-react";
@@ -45,6 +47,7 @@ import {
   useMailActions,
   useMoveToFolder,
   useTagActions,
+  type JunkAction,
 } from "@/hooks/use-mail-actions";
 import { useAccount } from "@/context/AccountContext";
 
@@ -70,6 +73,7 @@ export function MailList({
   checkedIds,
   onToggleCheck,
   inTrash,
+  junkAction,
 }: {
   items: Mail[];
   selectedId: string | null;
@@ -77,6 +81,7 @@ export function MailList({
   checkedIds: Set<string>;
   onToggleCheck: (id: string, range: boolean) => void;
   inTrash: boolean;
+  junkAction: JunkAction;
 }) {
   const anyChecked = checkedIds.size > 0;
   // Permanent deletion (from within Trash) is the only destructive path that
@@ -188,6 +193,14 @@ export function MailList({
                 <Trash2 />
                 {inTrash ? "Delete permanently" : "Move to trash"}
               </ContextMenuItem>
+              {junkAction && (
+                <ContextMenuItem onSelect={() => act(junkAction, mail.id)}>
+                  {junkAction === "notJunk" ? <ShieldCheck /> : <ShieldAlert />}
+                  {junkAction === "notJunk"
+                    ? "Mark as not junk"
+                    : "Mark as junk"}
+                </ContextMenuItem>
+              )}
               {moveTargets.length ? (
                 <>
                   <ContextMenuSeparator />

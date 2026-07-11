@@ -5,26 +5,28 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { KEYS } from "@/lib/shortcuts";
 import { isMac } from "@/lib/utils";
 
 const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: [isMac ? "⌘" : "Ctrl", "P"], label: "Command palette" },
-  { keys: ["c"], label: "Compose" },
-  { keys: ["r"], label: "Reply" },
-  { keys: ["a"], label: "Reply all" },
-  { keys: ["f"], label: "Forward" },
-  { keys: ["e"], label: "Archive" },
-  { keys: ["#"], label: "Move to trash" },
-  { keys: ["j"], label: "Next message" },
-  { keys: ["k"], label: "Previous message" },
-  { keys: ["/"], label: "Search" },
-  { keys: ["u"], label: "Mark as unread" },
-  { keys: ["i"], label: "Mark as read" },
+  { keys: [KEYS.compose], label: "Compose" },
+  { keys: [KEYS.reply], label: "Reply" },
+  { keys: [KEYS.replyAll], label: "Reply all" },
+  { keys: [KEYS.forward], label: "Forward" },
+  { keys: [KEYS.archive], label: "Archive" },
+  { keys: [KEYS.trash], label: "Move to trash" },
+  { keys: [KEYS.junk], label: "Mark as junk / not junk" },
+  { keys: [KEYS.nextMessage], label: "Next message" },
+  { keys: [KEYS.prevMessage], label: "Previous message" },
+  { keys: [KEYS.search], label: "Search" },
+  { keys: [KEYS.markUnread], label: "Mark as unread" },
+  { keys: [KEYS.markRead], label: "Mark as read" },
   { keys: [isMac ? "⌘" : "Ctrl", "Click"], label: "Select multiple" },
   { keys: ["Shift", "Click"], label: "Select range" },
   { keys: ["Esc"], label: "Back to list" },
   { keys: [isMac ? "⌘" : "Ctrl", "Enter"], label: "Send (in compose)" },
-  { keys: ["?"], label: "This help" },
+  { keys: [KEYS.help], label: "This help" },
 ];
 
 export function ShortcutsHelp({

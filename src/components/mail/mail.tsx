@@ -4,6 +4,8 @@ import {
   MailOpen,
   MailX,
   Search,
+  ShieldAlert,
+  ShieldCheck,
   SquarePen,
   Trash2,
   X,
@@ -52,9 +54,14 @@ import type { Mail as MailItem } from "@/components/mail/data";
 import { ShortcutsHelp } from "@/components/mail/shortcuts-help";
 import { CommandPalette } from "@/components/mail/command-palette";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
+import { KEYS } from "@/lib/shortcuts";
 import { noDialogOpen, useMenuEvents } from "@/hooks/use-menu";
 import { folders } from "@/components/mail/data";
-import { useMailActions, type MailAction } from "@/hooks/use-mail-actions";
+import {
+  useMailActions,
+  type JunkAction,
+  type MailAction,
+} from "@/hooks/use-mail-actions";
 import {
   emptyTrash,
   gmailCachedListQuery,
@@ -97,6 +104,14 @@ export function Mail() {
   const { activeAccount } = useAccount();
   const isIcloud = activeAccount?.kind === "icloud";
   const inTrash = activeFolder === "trash";
+  // Junk is a verdict on received mail: the junk folder offers the rescue,
+  // drafts offer nothing, everywhere else offers the report.
+  const junkAction: JunkAction =
+    activeFolder === "drafts"
+      ? null
+      : activeFolder === "junk"
+        ? "notJunk"
+        : "junk";
 
   useGmailSync(!isIcloud);
   useOfflineQueue();
@@ -262,15 +277,15 @@ export function Mail() {
   };
 
   useKeyboardShortcuts({
-    c: () => setComposeDraft({}),
-    j: () => moveSelection(1),
-    k: () => moveSelection(-1),
-    "/": () => searchRef.current?.focus(),
-    u: () => {
+    [KEYS.compose]: () => setComposeDraft({}),
+    [KEYS.nextMessage]: () => moveSelection(1),
+    [KEYS.prevMessage]: () => moveSelection(-1),
+    [KEYS.search]: () => searchRef.current?.focus(),
+    [KEYS.markUnread]: () => {
       if (checkedIds.size) actChecked("unread");
       else if (selected?.read) act("unread", selected.id);
     },
-    i: () => {
+    [KEYS.markRead]: () => {
       if (checkedIds.size) actChecked("read");
       else if (selected && !selected.read) act("read", selected.id);
     },
@@ -278,7 +293,7 @@ export function Mail() {
       if (checkedIds.size) setCheckedIds(new Set());
       else setSelectedId(null);
     },
-    "?": () => setHelpOpen(true),
+    [KEYS.help]: () => setHelpOpen(true),
   });
 
   // Native menu commands (File/Go/Message/Help). Reply and Reply All are
@@ -291,6 +306,11 @@ export function Mail() {
     archive: () =>
       noDialogOpen() && selected && act("archive", selected.id),
     // "trash" is handled in MailDisplay (it owns the permanent-delete confirm).
+    toggle_junk: () =>
+      noDialogOpen() &&
+      selected &&
+      junkAction &&
+      act(junkAction, selected.id),
     toggle_read: () =>
       noDialogOpen() &&
       selected &&
@@ -327,7 +347,7 @@ export function Mail() {
             >
               <SquarePen className="size-4" />
               Compose
-              <Kbd>C</Kbd>
+              <Kbd>{KEYS.compose}</Kbd>
             </Button>
             {inTrash && (
               <Button
@@ -408,6 +428,28 @@ export function Mail() {
                           {inTrash ? "Delete permanently" : "Move to trash"}
                         </TooltipContent>
                       </Tooltip>
+                      {junkAction && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => actChecked(junkAction)}
+                            >
+                              {junkAction === "notJunk" ? (
+                                <ShieldCheck className="size-4" />
+                              ) : (
+                                <ShieldAlert className="size-4" />
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {junkAction === "notJunk"
+                              ? "Mark as not junk"
+                              : "Mark as junk"}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
@@ -419,7 +461,7 @@ export function Mail() {
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>
-                          Mark as read <Kbd>i</Kbd>
+                          Mark as read <Kbd>{KEYS.markRead}</Kbd>
                         </TooltipContent>
                       </Tooltip>
                       <Tooltip>
@@ -433,7 +475,7 @@ export function Mail() {
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>
-                          Mark as unread <Kbd>u</Kbd>
+                          Mark as unread <Kbd>{KEYS.markUnread}</Kbd>
                         </TooltipContent>
                       </Tooltip>
                       <Tooltip>
@@ -479,6 +521,7 @@ export function Mail() {
                   checkedIds={checkedIds}
                   onToggleCheck={toggleCheck}
                   inTrash={inTrash}
+                  junkAction={junkAction}
                 />
               )}
               </div>
@@ -489,6 +532,7 @@ export function Mail() {
               <MailDisplay
                 mail={selected}
                 inTrash={inTrash}
+                junkAction={junkAction}
                 onDismiss={() => setSelectedId(null)}
               />
             </ResizablePanel>
@@ -543,6 +587,7 @@ export function Mail() {
           open={paletteOpen}
           onOpenChange={setPaletteOpen}
           selected={selected}
+          junkAction={junkAction}
           onSelectFolder={selectFolder}
           onCompose={() => setComposeDraft({})}
           // Wait out the dialog's close (Radix restores focus on unmount).

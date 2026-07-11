@@ -6,6 +6,8 @@ import {
   MailX,
   Reply,
   ReplyAll,
+  ShieldAlert,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -36,8 +38,9 @@ import {
   type ComposeDraft,
 } from "@/components/mail/compose";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
+import { KEYS } from "@/lib/shortcuts";
 import { noDialogOpen, useMenuEvents } from "@/hooks/use-menu";
-import { useMailActions } from "@/hooks/use-mail-actions";
+import { useMailActions, type JunkAction } from "@/hooks/use-mail-actions";
 import { mailBodyQuery, profileQuery, type MailBody } from "@/lib/gmail";
 import { icloudMessageBodyQuery, parseIcloudMailId } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
@@ -143,10 +146,12 @@ function initials(name: string) {
 export function MailDisplay({
   mail,
   inTrash,
+  junkAction,
   onDismiss,
 }: {
   mail: Mail | null;
   inTrash: boolean;
+  junkAction: JunkAction;
   onDismiss: () => void;
 }) {
   const [draft, setDraft] = useState<ComposeDraft | null>(null);
@@ -194,11 +199,12 @@ export function MailDisplay({
   };
 
   useKeyboardShortcuts({
-    r: () => mail && openReply(false),
-    a: () => mail && openReply(true),
-    f: () => mail && openForward(),
-    e: () => mail && act("archive", mail.id),
-    "#": () => trashSelected(),
+    [KEYS.reply]: () => mail && openReply(false),
+    [KEYS.replyAll]: () => mail && openReply(true),
+    [KEYS.forward]: () => mail && openForward(),
+    [KEYS.archive]: () => mail && act("archive", mail.id),
+    [KEYS.trash]: () => trashSelected(),
+    [KEYS.junk]: () => mail && junkAction && act(junkAction, mail.id),
   });
 
   useMenuEvents({
@@ -231,7 +237,7 @@ export function MailDisplay({
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            Archive <Kbd>e</Kbd>
+            Archive <Kbd>{KEYS.archive}</Kbd>
           </TooltipContent>
         </Tooltip>
         <Tooltip>
@@ -246,9 +252,32 @@ export function MailDisplay({
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {inTrash ? "Delete permanently" : "Move to trash"} <Kbd>#</Kbd>
+            {inTrash ? "Delete permanently" : "Move to trash"}{" "}
+            <Kbd>{KEYS.trash}</Kbd>
           </TooltipContent>
         </Tooltip>
+        {junkAction && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={isPending}
+                onClick={() => act(junkAction, mail.id)}
+              >
+                {junkAction === "notJunk" ? (
+                  <ShieldCheck className="size-4" />
+                ) : (
+                  <ShieldAlert className="size-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {junkAction === "notJunk" ? "Mark as not junk" : "Mark as junk"}{" "}
+              <Kbd>{KEYS.junk}</Kbd>
+            </TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -267,11 +296,11 @@ export function MailDisplay({
           <TooltipContent>
             {mail.read ? (
               <>
-                Mark as unread <Kbd>u</Kbd>
+                Mark as unread <Kbd>{KEYS.markUnread}</Kbd>
               </>
             ) : (
               <>
-                Mark as read <Kbd>i</Kbd>
+                Mark as read <Kbd>{KEYS.markRead}</Kbd>
               </>
             )}
           </TooltipContent>
@@ -305,7 +334,7 @@ export function MailDisplay({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              Reply <Kbd>r</Kbd>
+              Reply <Kbd>{KEYS.reply}</Kbd>
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -320,7 +349,7 @@ export function MailDisplay({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              Reply all <Kbd>a</Kbd>
+              Reply all <Kbd>{KEYS.replyAll}</Kbd>
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -335,7 +364,7 @@ export function MailDisplay({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              Forward <Kbd>f</Kbd>
+              Forward <Kbd>{KEYS.forward}</Kbd>
             </TooltipContent>
           </Tooltip>
         </div>
