@@ -17,7 +17,8 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ["j"], label: "Next message" },
   { keys: ["k"], label: "Previous message" },
   { keys: ["/"], label: "Search" },
-  { keys: ["u"], label: "Back to list" },
+  { keys: ["u"], label: "Mark as unread" },
+  { keys: ["Esc"], label: "Back to list" },
   { keys: [isMac ? "⌘" : "Ctrl", "Enter"], label: "Send (in compose)" },
   { keys: ["?"], label: "This help" },
 ];

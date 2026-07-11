@@ -189,7 +189,10 @@ export function Mail() {
     j: () => moveSelection(1),
     k: () => moveSelection(-1),
     "/": () => searchRef.current?.focus(),
-    u: () => setSelectedId(null),
+    u: () => {
+      if (selected?.read) act("unread", selected.id);
+    },
+    Escape: () => setSelectedId(null),
     "?": () => setHelpOpen(true),
   });
 
