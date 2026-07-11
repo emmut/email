@@ -2,6 +2,7 @@ import DOMPurify from "dompurify";
 import { invoke } from "@tauri-apps/api/core";
 import { queryOptions } from "@tanstack/react-query";
 import { cacheGet, cachePut } from "@/lib/cache";
+import { compareNames } from "@/lib/utils";
 import type { Mail } from "@/components/mail/data";
 import type { Contact, MailBody } from "@/lib/gmail";
 
@@ -15,7 +16,23 @@ export const ICLOUD_FOLDER_NAMES: Record<string, string> = {
   archive: "Archive",
 };
 
+// Custom (user-created) mailboxes get sidebar folder ids of the form
+// "icloud-mbx:<mailbox name>", analogous to Gmail's tag folder ids.
+const CUSTOM_FOLDER_PREFIX = "icloud-mbx:";
+
+export function icloudCustomFolderId(mailbox: string): string {
+  return `${CUSTOM_FOLDER_PREFIX}${mailbox}`;
+}
+
+export function icloudMailboxFromFolder(folder: string): string | null {
+  return folder.startsWith(CUSTOM_FOLDER_PREFIX)
+    ? folder.slice(CUSTOM_FOLDER_PREFIX.length)
+    : null;
+}
+
 export function icloudFolderName(folder: string): string {
+  const custom = icloudMailboxFromFolder(folder);
+  if (custom) return custom;
   return ICLOUD_FOLDER_NAMES[folder] ?? ICLOUD_FOLDER_NAMES.inbox;
 }
 
@@ -172,6 +189,42 @@ export function icloudMessageBodyQuery(accountId: string, folder: string, uid: n
   });
 }
 
+// User-created mailboxes for the sidebar "Folders" group — everything on the
+// server minus the standard mailboxes already shown as fixed folders.
+export function icloudFoldersQuery(accountId: string) {
+  const standard = new Set(Object.values(ICLOUD_FOLDER_NAMES));
+  return queryOptions({
+    queryKey: ["icloud", accountId, "folders"],
+    queryFn: async (): Promise<string[]> => {
+      try {
+        const all = await invoke<string[]>("icloud_list_folders", {
+          account_id: accountId,
+        });
+        const custom = all
+          .filter((name) => !standard.has(name))
+          .sort(compareNames);
+        cachePut(`icloud:folders:${accountId}`, custom);
+        return custom;
+      } catch (err) {
+        // Offline — fall back to the last known folder list.
+        const cached = await cacheGet<string[]>(`icloud:folders:${accountId}`);
+        if (cached) return cached;
+        throw err;
+      }
+    },
+    enabled: !!accountId,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function icloudCreateFolder(accountId: string, name: string) {
+  return invoke<void>("icloud_create_folder", { account_id: accountId, name });
+}
+
+export function icloudDeleteFolder(accountId: string, name: string) {
+  return invoke<void>("icloud_delete_folder", { account_id: accountId, name });
+}
+
 // Sidebar badge counts keyed by app folder id (inbox/junk unread, drafts total).
 export function icloudFolderCountsQuery(accountId: string) {
   return queryOptions({
@@ -227,6 +280,18 @@ export function icloudSendMessage(params: {
   });
 }
 
+// Save an unsent message into the Drafts mailbox (IMAP APPEND, \Draft flag).
+// `mime` is the complete RFC 822 message, built by the shared frontend
+// builder so Gmail and iCloud drafts have identical content.
+export function icloudSaveDraft(accountId: string, mime: string) {
+  return invoke<void>("icloud_append_message", {
+    account_id: accountId,
+    folder: ICLOUD_FOLDER_NAMES.drafts,
+    content: mime,
+    draft: true,
+  });
+}
+
 export function icloudMarkRead(accountId: string, folder: string, uid: number, read: boolean) {
   return invoke<void>("icloud_mark_read", { account_id: accountId, folder, uid, read });
 }
@@ -242,6 +307,43 @@ export function icloudMoveMessage(
     folder,
     uid,
     target_folder: targetFolder,
+  });
+}
+
+// Junk verdict: stores Apple Mail's $Junk/$NotJunk keywords and moves the
+// message to Junk (or back to Inbox) in one IMAP round trip.
+export function icloudMarkJunk(
+  accountId: string,
+  folder: string,
+  uid: number,
+  junk: boolean,
+) {
+  return invoke<void>("icloud_mark_junk", {
+    account_id: accountId,
+    folder,
+    uid,
+    junk,
+    target_folder: junk ? ICLOUD_FOLDER_NAMES.junk : ICLOUD_FOLDER_NAMES.inbox,
+  });
+}
+
+// Permanent removal (\Deleted + EXPUNGE) — used from the Trash folder.
+export function icloudDeleteMessage(
+  accountId: string,
+  folder: string,
+  uid: number,
+) {
+  return invoke<void>("icloud_delete_message", {
+    account_id: accountId,
+    folder,
+    uid,
+  });
+}
+
+export function icloudEmptyFolder(accountId: string, folder: string) {
+  return invoke<void>("icloud_empty_folder", {
+    account_id: accountId,
+    folder,
   });
 }
 
@@ -261,6 +363,28 @@ export function toMail(msg: IcloudMessageSummary): Mail {
   };
 }
 
+
+// --- avatar ---
+
+// Apple exposes no profile-photo API for app-specific passwords (IMAP/SMTP
+// only), so the best available avatar is a Gravatar keyed by the email hash.
+// d=404 makes a missing Gravatar fail the <img> load, which drops the Radix
+// Avatar back to the initials fallback.
+export function icloudAvatarQuery(email: string) {
+  return queryOptions({
+    queryKey: ["icloud", "avatar", email],
+    queryFn: async (): Promise<string> => {
+      const bytes = new TextEncoder().encode(email.trim().toLowerCase());
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const hash = Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+      return `https://www.gravatar.com/avatar/${hash}?s=160&d=404`;
+    },
+    enabled: !!email,
+    staleTime: Infinity,
+  });
+}
 
 // --- contacts ---
 

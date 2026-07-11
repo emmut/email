@@ -6,8 +6,12 @@ import {
   applyGmailActionToCache,
   applyGmailLabelChange,
   archiveMessage,
+  deleteMessage,
+  junkMessage,
   markRead,
   markUnread,
+  notJunkMessage,
+  removeGmailFromCache,
   setMessageTag,
   tagFolderId,
   trashMessage,
@@ -15,6 +19,8 @@ import {
 } from "@/lib/gmail";
 import {
   ICLOUD_FOLDER_NAMES,
+  icloudDeleteMessage,
+  icloudMarkJunk,
   icloudMarkRead,
   icloudMoveMessage,
   parseIcloudMailId,
@@ -26,13 +32,24 @@ import {
   queueIcloudAction,
 } from "@/lib/offline";
 
-export type MailAction = "archive" | "trash" | "read" | "unread";
+export type MailAction =
+  | "archive"
+  | "trash"
+  | "read"
+  | "unread"
+  | "delete"
+  | "junk"
+  | "notJunk";
+
+// The junk verdict a view offers: report as junk, rescue from the junk
+// folder, or nothing at all (drafts are outgoing mail — no verdict applies).
+export type JunkAction = Extract<MailAction, "junk" | "notJunk"> | null;
 
 // How an action changes a folder's badge. The drafts badge counts all mail,
 // the others count unread mail.
 function countDelta(action: MailAction, folder: string, read: boolean): number {
   if (folder === "drafts") {
-    return action === "archive" || action === "trash" ? -1 : 0;
+    return action === "read" || action === "unread" ? 0 : -1;
   }
   switch (action) {
     case "read":
@@ -41,6 +58,9 @@ function countDelta(action: MailAction, folder: string, read: boolean): number {
       return read ? 1 : 0;
     case "archive":
     case "trash":
+    case "delete":
+    case "junk":
+    case "notJunk":
       return read ? 0 : -1;
   }
 }
@@ -83,11 +103,24 @@ export function useMailActions(onRemoved?: (id: string) => void) {
                 action === "read",
               );
               return;
+            case "junk":
+            case "notJunk":
+              await icloudMarkJunk(
+                activeAccount.id,
+                ref.folder,
+                ref.uid,
+                action === "junk",
+              );
+              return;
+            case "delete":
+              await icloudDeleteMessage(activeAccount.id, ref.folder, ref.uid);
+              return;
           }
         } catch (err) {
           // Offline: journal the action (also updates the SQLite cache) and
           // keep the optimistic UI — it replays when connectivity returns.
-          if (!isNetworkError(err)) throw err;
+          // Permanent deletes are never queued: too destructive to replay.
+          if (!isNetworkError(err) || action === "delete") throw err;
           await queueIcloudAction(activeAccount.id, ref.folder, ref.uid, action);
           return;
         }
@@ -106,9 +139,18 @@ export function useMailActions(onRemoved?: (id: string) => void) {
           case "unread":
             await markUnread(id);
             return;
+          case "junk":
+            await junkMessage(id);
+            return;
+          case "notJunk":
+            await notJunkMessage(id);
+            return;
+          case "delete":
+            await deleteMessage(id);
+            return;
         }
       } catch (err) {
-        if (!isNetworkError(err)) throw err;
+        if (!isNetworkError(err) || action === "delete") throw err;
         await queueGmailAction(id, action);
       }
     },
@@ -133,7 +175,7 @@ export function useMailActions(onRemoved?: (id: string) => void) {
                   (m) => !(m.uid === ref.uid && m.folder === ref.folder),
                 ),
         );
-        if (action === "archive" || action === "trash") onRemoved?.(id);
+        if (action !== "read" && action !== "unread") onRemoved?.(id);
         return {
           previous: undefined,
           previousCounts: undefined,
@@ -188,10 +230,11 @@ export function useMailActions(onRemoved?: (id: string) => void) {
         }
       }
 
-      if (action === "archive" || action === "trash") onRemoved?.(id);
+      if (action !== "read" && action !== "unread") onRemoved?.(id);
       // Mirror the change into the local message store right away — durable
       // across restarts whether the server call succeeds now or replays later.
-      void applyGmailActionToCache(id, action);
+      if (action === "delete") void removeGmailFromCache(id);
+      else void applyGmailActionToCache(id, action);
       return { previous, previousCounts, icloudPrevious: undefined };
     },
     onError: (_err, _vars, context) => {
@@ -214,7 +257,7 @@ export function useMailActions(onRemoved?: (id: string) => void) {
           queryKey: ["icloud", activeAccount.id, "counts"],
         });
         // Reconcile the destination folder's list in the background.
-        if (action === "archive" || action === "trash") {
+        if (action !== "read" && action !== "unread") {
           queryClient.invalidateQueries({
             queryKey: ["icloud", activeAccount.id, "messages"],
           });
@@ -224,7 +267,7 @@ export function useMailActions(onRemoved?: (id: string) => void) {
       queryClient.invalidateQueries({ queryKey: ["gmail", "counts"] });
       // Reconcile other folders (archive/trash destinations) in the background;
       // read/unread already left every list cache correct.
-      if (action === "archive" || action === "trash") {
+      if (action !== "read" && action !== "unread") {
         queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
       }
     },
@@ -233,6 +276,59 @@ export function useMailActions(onRemoved?: (id: string) => void) {
   return {
     act: (action: MailAction, id: string) => mutation.mutate({ action, id }),
     isPending: mutation.isPending,
+    // Failures roll the optimistic update back; surface why so a "nothing
+    // happened" (e.g. denied permanent delete) isn't silent.
+    error: mutation.error,
+  };
+}
+
+// Move an iCloud message to an arbitrary mailbox (context-menu "Move to
+// folder"). Optimistic like archive: the card leaves the current list at
+// once and comes back if the server says no. Not offline-queued.
+export function useMoveToFolder() {
+  const queryClient = useQueryClient();
+  const { activeAccount } = useAccount();
+
+  const mutation = useMutation({
+    mutationFn: async ({ id, target }: { id: string; target: string }) => {
+      const ref = parseIcloudMailId(id);
+      if (!ref || !activeAccount) {
+        throw new Error("moving to a folder requires an iCloud account");
+      }
+      await icloudMoveMessage(activeAccount.id, ref.folder, ref.uid, target);
+    },
+    onMutate: async ({ id }) => {
+      const ref = parseIcloudMailId(id);
+      if (!ref || !activeAccount) return { previous: undefined };
+      const listKey = ["icloud", activeAccount.id, "messages"];
+      await queryClient.cancelQueries({ queryKey: listKey });
+      const previous = queryClient.getQueriesData<IcloudMessageSummary[]>({
+        queryKey: listKey,
+      });
+      queryClient.setQueriesData<IcloudMessageSummary[]>(
+        { queryKey: listKey },
+        (old) =>
+          old?.filter((m) => !(m.uid === ref.uid && m.folder === ref.folder)),
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      context?.previous?.forEach(([key, data]) =>
+        queryClient.setQueryData(key, data),
+      );
+    },
+    onSuccess: () => {
+      if (!activeAccount) return;
+      // Reconcile the destination folder's list and the badge counts.
+      queryClient.invalidateQueries({
+        queryKey: ["icloud", activeAccount.id],
+      });
+    },
+  });
+
+  return {
+    moveTo: (id: string, target: string) => mutation.mutate({ id, target }),
+    error: mutation.error,
   };
 }
 

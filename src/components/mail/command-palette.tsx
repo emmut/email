@@ -13,6 +13,8 @@ import {
   RefreshCw,
   Search,
   Send,
+  ShieldAlert,
+  ShieldCheck,
   SquarePen,
   Tag as TagIcon,
   Trash2,
@@ -32,8 +34,9 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { folders, type Mail } from "@/components/mail/data";
-import type { MailAction } from "@/hooks/use-mail-actions";
+import type { JunkAction, MailAction } from "@/hooks/use-mail-actions";
 import { tagFolderId, tagsQuery } from "@/lib/gmail";
+import { KEYS } from "@/lib/shortcuts";
 import { useAccount } from "@/context/AccountContext";
 
 const FOLDER_ICONS: Record<string, LucideIcon> = {
@@ -49,22 +52,26 @@ export function CommandPalette({
   open,
   onOpenChange,
   selected,
+  junkAction,
   onSelectFolder,
   onCompose,
   onFocusSearch,
   onShowShortcuts,
   onSetTab,
   onAct,
+  onEmptyTrash,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   selected: Mail | null;
+  junkAction: JunkAction;
   onSelectFolder: (id: string) => void;
   onCompose: () => void;
   onFocusSearch: () => void;
   onShowShortcuts: () => void;
   onSetTab: (tab: "all" | "unread") => void;
   onAct: (action: MailAction, id: string) => void;
+  onEmptyTrash: () => void;
 }) {
   const queryClient = useQueryClient();
   const { accounts, activeAccount, activeAccountId, switchAccount } =
@@ -120,21 +127,25 @@ export function CommandPalette({
           <CommandItem onSelect={run(onCompose)}>
             <SquarePen />
             Compose
-            <CommandShortcut>C</CommandShortcut>
+            <CommandShortcut>{KEYS.compose}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={run(onFocusSearch)}>
             <Search />
             Search mail
-            <CommandShortcut>/</CommandShortcut>
+            <CommandShortcut>{KEYS.search}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={run(refresh)}>
             <RefreshCw />
             Refresh
           </CommandItem>
+          <CommandItem value="empty trash" onSelect={run(onEmptyTrash)}>
+            <Trash2 />
+            Empty trash
+          </CommandItem>
           <CommandItem onSelect={run(onShowShortcuts)}>
             <Keyboard />
             Keyboard shortcuts
-            <CommandShortcut>?</CommandShortcut>
+            <CommandShortcut>{KEYS.help}</CommandShortcut>
           </CommandItem>
         </CommandGroup>
         {selected && (
@@ -144,22 +155,33 @@ export function CommandPalette({
               <CommandItem onSelect={run(() => onAct("archive", selected.id))}>
                 <Archive />
                 Archive
-                <CommandShortcut>E</CommandShortcut>
+                <CommandShortcut>{KEYS.archive}</CommandShortcut>
               </CommandItem>
               <CommandItem onSelect={run(() => onAct("trash", selected.id))}>
                 <Trash2 />
                 Move to trash
-                <CommandShortcut>#</CommandShortcut>
+                <CommandShortcut>{KEYS.trash}</CommandShortcut>
               </CommandItem>
+              {junkAction && (
+                <CommandItem onSelect={run(() => onAct(junkAction, selected.id))}>
+                  {junkAction === "notJunk" ? <ShieldCheck /> : <ShieldAlert />}
+                  {junkAction === "notJunk"
+                    ? "Mark as not junk"
+                    : "Mark as junk"}
+                  <CommandShortcut>{KEYS.junk}</CommandShortcut>
+                </CommandItem>
+              )}
               {selected.read ? (
                 <CommandItem onSelect={run(() => onAct("unread", selected.id))}>
                   <MailIcon />
                   Mark as unread
+                  <CommandShortcut>{KEYS.markUnread}</CommandShortcut>
                 </CommandItem>
               ) : (
                 <CommandItem onSelect={run(() => onAct("read", selected.id))}>
                   <MailOpen />
                   Mark as read
+                  <CommandShortcut>{KEYS.markRead}</CommandShortcut>
                 </CommandItem>
               )}
             </CommandGroup>
@@ -180,7 +202,9 @@ export function CommandPalette({
               </CommandItem>
             );
           })}
-          {(tags ?? []).map((tag) => (
+          {/* Same guard as the list: disabled queries still return cached
+              Gmail tags after switching to an iCloud account. */}
+          {(isIcloud ? [] : (tags ?? [])).map((tag) => (
             <CommandItem
               key={tag.id}
               value={`go to tag ${tag.name}`}

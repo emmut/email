@@ -1,10 +1,13 @@
 import { useState } from "react";
 import {
   Archive,
+  Forward,
   MailOpen,
   MailX,
   Reply,
   ReplyAll,
+  ShieldAlert,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -35,8 +38,9 @@ import {
   type ComposeDraft,
 } from "@/components/mail/compose";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
+import { KEYS } from "@/lib/shortcuts";
 import { noDialogOpen, useMenuEvents } from "@/hooks/use-menu";
-import { useMailActions } from "@/hooks/use-mail-actions";
+import { useMailActions, type JunkAction } from "@/hooks/use-mail-actions";
 import { mailBodyQuery, profileQuery, type MailBody } from "@/lib/gmail";
 import { icloudMessageBodyQuery, parseIcloudMailId } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
@@ -71,7 +75,11 @@ function quoteOriginal(body: MailBody): string {
   );
 }
 
-function replyDraft(body: MailBody, all: boolean, self: string): ComposeDraft {
+export function replyDraft(
+  body: MailBody,
+  all: boolean,
+  self: string,
+): ComposeDraft {
   const notSelf = (addr: string) =>
     bareAddress(addr) !== self && bareAddress(addr) !== bareAddress(body.replyTo);
   const to = all
@@ -85,6 +93,30 @@ function replyDraft(body: MailBody, all: boolean, self: string): ComposeDraft {
     bodyHtml: quoteOriginal(body),
     threadId: body.threadId,
     inReplyTo: body.messageId,
+    references: `${body.references} ${body.messageId}`.trim(),
+  };
+}
+
+export function forwardDraft(body: MailBody): ComposeDraft {
+  const headers = [
+    `From: ${body.from}`,
+    `Date: ${body.date}`,
+    `Subject: ${body.subject}`,
+    `To: ${body.to}`,
+    ...(body.cc ? [`Cc: ${body.cc}`] : []),
+  ]
+    .map(escapeHtml)
+    .join("<br>");
+  const quoted = body.text.trim().split("\n").map(escapeHtml).join("<br>");
+  return {
+    forward: true,
+    subject: /^fwd:/i.test(body.subject)
+      ? body.subject
+      : `Fwd: ${body.subject}`,
+    bodyHtml:
+      `<p></p><p>---------- Forwarded message ----------<br>${headers}</p>` +
+      (quoted ? `<blockquote><p>${quoted}</p></blockquote>` : ""),
+    threadId: body.threadId,
     references: `${body.references} ${body.messageId}`.trim(),
   };
 }
@@ -113,13 +145,17 @@ function initials(name: string) {
 
 export function MailDisplay({
   mail,
+  inTrash,
+  junkAction,
   onDismiss,
 }: {
   mail: Mail | null;
+  inTrash: boolean;
+  junkAction: JunkAction;
   onDismiss: () => void;
 }) {
   const [draft, setDraft] = useState<ComposeDraft | null>(null);
-  const [confirmTrash, setConfirmTrash] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const { activeAccount } = useAccount();
   const icloudRef = mail ? parseIcloudMailId(mail.id) : null;
@@ -147,18 +183,35 @@ export function MailDisplay({
     setDraft(replyDraft(bodyQuery.data, all, self));
   };
 
-  const { act, isPending } = useMailActions(() => onDismiss());
+  const openForward = () => {
+    if (!bodyQuery.data) return;
+    setDraft(forwardDraft(bodyQuery.data));
+  };
+
+  const { act, isPending, error: actError } = useMailActions(() => onDismiss());
+
+  // Trash is instant (recoverable for 30 days); deleting from within Trash
+  // is forever, so that one asks first.
+  const trashSelected = () => {
+    if (!mail) return;
+    if (inTrash) setConfirmDelete(true);
+    else act("trash", mail.id);
+  };
 
   useKeyboardShortcuts({
-    r: () => mail && openReply(false),
-    a: () => mail && openReply(true),
-    e: () => mail && act("archive", mail.id),
-    "#": () => mail && setConfirmTrash(true),
+    [KEYS.reply]: () => mail && openReply(false),
+    [KEYS.replyAll]: () => mail && openReply(true),
+    [KEYS.forward]: () => mail && openForward(),
+    [KEYS.archive]: () => mail && act("archive", mail.id),
+    [KEYS.trash]: () => trashSelected(),
+    [KEYS.junk]: () => mail && junkAction && act(junkAction, mail.id),
   });
 
   useMenuEvents({
     reply: () => noDialogOpen() && mail && openReply(false),
     reply_all: () => noDialogOpen() && mail && openReply(true),
+    forward: () => noDialogOpen() && mail && openForward(),
+    trash: () => noDialogOpen() && trashSelected(),
   });
 
   if (!mail) {
@@ -184,7 +237,7 @@ export function MailDisplay({
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            Archive <Kbd>e</Kbd>
+            Archive <Kbd>{KEYS.archive}</Kbd>
           </TooltipContent>
         </Tooltip>
         <Tooltip>
@@ -193,15 +246,38 @@ export function MailDisplay({
               variant="ghost"
               size="icon"
               disabled={isPending}
-              onClick={() => setConfirmTrash(true)}
+              onClick={trashSelected}
             >
               <Trash2 className="size-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            Move to trash <Kbd>#</Kbd>
+            {inTrash ? "Delete permanently" : "Move to trash"}{" "}
+            <Kbd>{KEYS.trash}</Kbd>
           </TooltipContent>
         </Tooltip>
+        {junkAction && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={isPending}
+                onClick={() => act(junkAction, mail.id)}
+              >
+                {junkAction === "notJunk" ? (
+                  <ShieldCheck className="size-4" />
+                ) : (
+                  <ShieldAlert className="size-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {junkAction === "notJunk" ? "Mark as not junk" : "Mark as junk"}{" "}
+              <Kbd>{KEYS.junk}</Kbd>
+            </TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -218,22 +294,29 @@ export function MailDisplay({
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {mail.read ? "Mark as unread" : "Mark as read"}
+            {mail.read ? (
+              <>
+                Mark as unread <Kbd>{KEYS.markUnread}</Kbd>
+              </>
+            ) : (
+              <>
+                Mark as read <Kbd>{KEYS.markRead}</Kbd>
+              </>
+            )}
           </TooltipContent>
         </Tooltip>
-        <AlertDialog open={confirmTrash} onOpenChange={setConfirmTrash}>
+        <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Move to trash?</AlertDialogTitle>
+              <AlertDialogTitle>Delete permanently?</AlertDialogTitle>
               <AlertDialogDescription>
-                “{mail.subject}” moves to Trash. Trashed mail is deleted
-                permanently after 30 days.
+                “{mail.subject}” is deleted forever. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => act("trash", mail.id)}>
-                Move to trash
+              <AlertDialogAction onClick={() => act("delete", mail.id)}>
+                Delete permanently
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -251,7 +334,7 @@ export function MailDisplay({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              Reply <Kbd>r</Kbd>
+              Reply <Kbd>{KEYS.reply}</Kbd>
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -266,12 +349,32 @@ export function MailDisplay({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              Reply all <Kbd>a</Kbd>
+              Reply all <Kbd>{KEYS.replyAll}</Kbd>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={!bodyQuery.data}
+                onClick={openForward}
+              >
+                <Forward className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Forward <Kbd>{KEYS.forward}</Kbd>
             </TooltipContent>
           </Tooltip>
         </div>
       </div>
       <ComposeDialog draft={draft} onClose={() => setDraft(null)} />
+      {actError && (
+        <p className="text-destructive px-4 pb-2 text-xs">
+          Action failed: {actError.message}
+        </p>
+      )}
       <Separator />
       <div className="flex items-start gap-4 p-4">
         <Avatar>

@@ -5,6 +5,7 @@ import { fetch } from "@tauri-apps/plugin-http";
 import { queryOptions, useQueryClient } from "@tanstack/react-query";
 import { getAccessToken } from "@/lib/auth";
 import { cacheDeletePrefix, cacheGet, cachePut } from "@/lib/cache";
+import { compareNames } from "@/lib/utils";
 import type { Mail } from "@/components/mail/data";
 
 // Gmail is single-account today (legacy OAuth token); the local message store
@@ -275,7 +276,7 @@ export const tagsQuery = queryOptions({
     return res.labels
       .filter((l) => l.type === "user")
       .map((l) => ({ id: l.id, name: l.name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => compareNames(a.name, b.name));
   },
   staleTime: 5 * 60_000,
 });
@@ -462,6 +463,8 @@ const ACTION_LABEL_OPS: Record<string, { add: string[]; remove: string[] }> = {
   unread: { add: ["UNREAD"], remove: [] },
   archive: { add: [], remove: ["INBOX"] },
   trash: { add: ["TRASH"], remove: ["INBOX"] },
+  junk: { add: ["SPAM"], remove: ["INBOX"] },
+  notJunk: { add: ["INBOX"], remove: ["SPAM"] },
 };
 
 export function applyGmailLabelChange(
@@ -479,10 +482,18 @@ export function applyGmailLabelChange(
 
 export function applyGmailActionToCache(
   id: string,
-  action: "read" | "unread" | "archive" | "trash",
+  action: "read" | "unread" | "archive" | "trash" | "junk" | "notJunk",
 ) {
   const ops = ACTION_LABEL_OPS[action];
   return applyGmailLabelChange(id, ops.add, ops.remove);
+}
+
+// Drop a permanently deleted message from the local store.
+export function removeGmailFromCache(id: string) {
+  return invoke("gmail_cache_delete", {
+    account_id: GMAIL_CACHE_ACCOUNT,
+    ids: [id],
+  });
 }
 
 export function mailListQuery(folder: string, search: string) {
@@ -694,8 +705,62 @@ export function archiveMessage(id: string) {
   return modifyMessage(id, { removeLabelIds: ["INBOX"] });
 }
 
+// Gmail's spam verdict is the SPAM system label — the same modify call the
+// web UI's "Report spam"/"Not spam" buttons make.
+export function junkMessage(id: string) {
+  return modifyMessage(id, { addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] });
+}
+
+export function notJunkMessage(id: string) {
+  return modifyMessage(id, { addLabelIds: ["INBOX"], removeLabelIds: ["SPAM"] });
+}
+
 export function trashMessage(id: string) {
   return gmail<Message>(`/messages/${id}/trash`, { method: "POST" });
+}
+
+// Accounts authorized before the full-mail scope was adopted hold tokens that
+// can modify but not delete; Google answers 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT
+// until the user re-consents. Translate that to an actionable message.
+function withScopeHint(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    msg.startsWith("Google API 403") &&
+    /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient/i.test(msg)
+  ) {
+    return new Error(
+      "Google denied permanent deletion: this sign-in predates the delete permission. Sign out and sign in again to grant it.",
+    );
+  }
+  return err instanceof Error ? err : new Error(msg);
+}
+
+// Permanent removal — needs the full mail scope, not gmail.modify.
+export async function deleteMessage(id: string) {
+  try {
+    await gmail<void>(`/messages/${id}`, { method: "DELETE" });
+  } catch (err) {
+    throw withScopeHint(err);
+  }
+}
+
+export async function emptyTrash() {
+  try {
+    // batchDelete caps at 1000 ids; page until the trash listing runs dry.
+    for (;;) {
+      const page = await gmail<{ messages?: MessageRef[] }>(
+        "/messages?labelIds=TRASH&maxResults=500",
+      );
+      const ids = (page.messages ?? []).map((m) => m.id);
+      if (!ids.length) return;
+      await gmail<void>("/messages/batchDelete", {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      });
+    }
+  } catch (err) {
+    throw withScopeHint(err);
+  }
 }
 
 export function markRead(id: string) {
@@ -768,10 +833,14 @@ function encodeAddressList(raw: string): string {
     .join(", ");
 }
 
-// Build an RFC 822 message and send it. Gmail fills in From/Date/Message-ID.
-export async function sendMessage(msg: OutgoingMail) {
+// Build an RFC 822 message. Gmail fills in From/Date/Message-ID itself; for
+// IMAP APPEND (iCloud drafts) pass `from` so those headers are present.
+export function buildRfc822(msg: OutgoingMail, from?: string): string {
   const headers = [
-    `To: ${encodeAddressList(stripNewlines(msg.to))}`,
+    ...(from ? [`From: ${encodeAddressList(stripNewlines(from))}`] : []),
+    ...(from ? [`Date: ${new Date().toUTCString()}`] : []),
+    // Drafts may not have a recipient yet.
+    ...(msg.to.trim() ? [`To: ${encodeAddressList(stripNewlines(msg.to))}`] : []),
     ...(msg.cc ? [`Cc: ${encodeAddressList(stripNewlines(msg.cc))}`] : []),
     ...(msg.bcc ? [`Bcc: ${encodeAddressList(stripNewlines(msg.bcc))}`] : []),
     `Subject: ${encodeHeaderValue(stripNewlines(msg.subject))}`,
@@ -780,23 +849,28 @@ export async function sendMessage(msg: OutgoingMail) {
     "MIME-Version: 1.0",
   ];
 
-  let rfc822: string;
   if (msg.html) {
     const boundary = `b${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-    rfc822 =
+    return (
       headers.join("\r\n") +
       `\r\nContent-Type: multipart/alternative; boundary="${boundary}"\r\n\r\n` +
       `--${boundary}\r\n${mimePart("text/plain", msg.body)}\r\n` +
       `--${boundary}\r\n${mimePart("text/html", msg.html)}\r\n` +
-      `--${boundary}--`;
-  } else {
-    rfc822 = headers.join("\r\n") + "\r\n" + mimePart("text/plain", msg.body);
+      `--${boundary}--`
+    );
   }
+  return headers.join("\r\n") + "\r\n" + mimePart("text/plain", msg.body);
+}
 
-  const raw = bytesToBase64(new TextEncoder().encode(rfc822))
+function toBase64Url(rfc822: string): string {
+  return bytesToBase64(new TextEncoder().encode(rfc822))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
+}
+
+export async function sendMessage(msg: OutgoingMail) {
+  const raw = toBase64Url(buildRfc822(msg));
   const sent = await gmail<Message>("/messages/send", {
     method: "POST",
     body: JSON.stringify({ raw, ...(msg.threadId ? { threadId: msg.threadId } : {}) }),
@@ -805,6 +879,17 @@ export async function sendMessage(msg: OutgoingMail) {
     await modifyMessage(sent.id, { addLabelIds: msg.labelIds });
   }
   return sent;
+}
+
+// Save an unsent message into Gmail's Drafts.
+export function saveDraft(msg: OutgoingMail) {
+  const raw = toBase64Url(buildRfc822(msg));
+  return gmail<{ id: string }>("/drafts", {
+    method: "POST",
+    body: JSON.stringify({
+      message: { raw, ...(msg.threadId ? { threadId: msg.threadId } : {}) },
+    }),
+  });
 }
 
 // --- historyId delta sync ---

@@ -17,7 +17,9 @@ use tauri_plugin_opener::OpenerExt;
 pub const AUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 pub const REVOKE_ENDPOINT: &str = "https://oauth2.googleapis.com/revoke";
-pub const SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/userinfo.profile";
+// Full mail scope (not gmail.modify): permanent delete and empty-trash use
+// messages.delete/batchDelete, which gmail.modify does not permit.
+pub const SCOPE: &str = "https://mail.google.com/ https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/userinfo.profile";
 const KEYCHAIN_SERVICE: &str = "com.emiljansson.email";
 const KEYCHAIN_USER: &str = "gmail-refresh-token";
 const REDIRECT_TIMEOUT: Duration = Duration::from_secs(300);

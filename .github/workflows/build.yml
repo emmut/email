@@ -7,7 +7,52 @@ on:
   pull_request:
     branches: [main]
 
+# One run per PR/branch; a new push cancels the in-flight run to save minutes.
+# main/tag pushes are never cancelled — they publish artifacts/releases.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Fast fail: typecheck frontend + backend before the expensive bundle builds.
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck frontend
+        run: pnpm exec tsc --noEmit
+
+      - name: Frontend tests
+        run: pnpm exec vitest run
+
+      - name: Cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Cargo tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
   build:
     permissions:
       contents: write

@@ -38,10 +38,27 @@ function findGoogleAccountId(): Promise<string | null> {
   return googleAccountIdPromise;
 }
 
+// Sign-out + sign-in creates a NEW account row (new id, new keychain entry);
+// call this whenever accounts change so the next token fetch re-resolves.
+export function resetGoogleAccountId() {
+  googleAccountIdPromise = null;
+}
+
 export async function getAccessToken(): Promise<string> {
   const accountId = await findGoogleAccountId();
   if (accountId) {
-    return invoke("get_google_access_token", { account_id: accountId });
+    try {
+      return await invoke("get_google_access_token", { account_id: accountId });
+    } catch (err) {
+      // Belt and braces: the cached id may point at a removed account row.
+      // Re-resolve once; rethrow if the account genuinely can't refresh.
+      resetGoogleAccountId();
+      const freshId = await findGoogleAccountId();
+      if (freshId && freshId !== accountId) {
+        return invoke("get_google_access_token", { account_id: freshId });
+      }
+      throw err;
+    }
   }
   return invoke("get_access_token");
 }

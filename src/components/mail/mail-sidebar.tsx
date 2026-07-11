@@ -4,6 +4,7 @@ import {
   ArchiveX,
   ChevronsUpDown,
   File,
+  Folder,
   Inbox,
   LogOut,
   Plus,
@@ -80,7 +81,14 @@ import {
   tagsQuery,
   type Tag,
 } from "@/lib/gmail";
-import { icloudFolderCountsQuery } from "@/lib/icloud";
+import {
+  icloudAvatarQuery,
+  icloudCreateFolder,
+  icloudCustomFolderId,
+  icloudDeleteFolder,
+  icloudFolderCountsQuery,
+  icloudFoldersQuery,
+} from "@/lib/icloud";
 import { pendingOpsQuery, useOnline } from "@/lib/offline";
 import { invoke } from "@tauri-apps/api/core";
 import { CloudOff } from "lucide-react";
@@ -124,10 +132,22 @@ export function MailSidebar({
   });
   const counts = isIcloud ? icloudCounts : gmailCounts;
   const { data: tags } = useQuery({ ...tagsQuery, enabled: !isIcloud });
-  const { data: avatar } = useQuery({ ...avatarQuery, enabled: !isIcloud });
+  const { data: icloudFolders } = useQuery({
+    ...icloudFoldersQuery(activeAccount?.id ?? ""),
+    enabled: isIcloud,
+  });
+  const { data: gmailAvatar } = useQuery({ ...avatarQuery, enabled: !isIcloud });
+  const { data: icloudAvatar } = useQuery({
+    ...icloudAvatarQuery(activeAccount?.email ?? ""),
+    enabled: isIcloud,
+  });
+  const avatar = isIcloud ? icloudAvatar : gmailAvatar;
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Tag | null>(null);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [deleteFolderTarget, setDeleteFolderTarget] = useState<string | null>(null);
   const online = useOnline();
   const { data: pendingOps } = useQuery(pendingOpsQuery);
   const pendingCount = pendingOps?.length ?? 0;
@@ -153,6 +173,30 @@ export function MailSidebar({
       queryClient.invalidateQueries({ queryKey: ["gmail", "tags"] });
       queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
       if (activeFolder === tagFolderId(tag.id)) onSelectFolder("inbox");
+    },
+  });
+
+  const createFolderMutation = useMutation({
+    mutationFn: (name: string) =>
+      icloudCreateFolder(activeAccount?.id ?? "", name),
+    onSuccess: (_data, name) => {
+      queryClient.invalidateQueries({
+        queryKey: ["icloud", activeAccount?.id, "folders"],
+      });
+      setNewFolderOpen(false);
+      setNewFolderName("");
+      onSelectFolder(icloudCustomFolderId(name));
+    },
+  });
+
+  const deleteFolderMutation = useMutation({
+    mutationFn: (name: string) =>
+      icloudDeleteFolder(activeAccount?.id ?? "", name),
+    onSuccess: (_data, name) => {
+      queryClient.invalidateQueries({
+        queryKey: ["icloud", activeAccount?.id, "folders"],
+      });
+      if (activeFolder === icloudCustomFolderId(name)) onSelectFolder("inbox");
     },
   });
 
@@ -338,6 +382,47 @@ export function MailSidebar({
           </SidebarMenu>
         </SidebarGroup>
         )}
+        {isIcloud && (
+        <SidebarGroup>
+          <SidebarGroupLabel>Folders</SidebarGroupLabel>
+          <SidebarGroupAction
+            title="New folder"
+            onClick={() => setNewFolderOpen(true)}
+          >
+            <Plus />
+          </SidebarGroupAction>
+          <SidebarMenu>
+            {(icloudFolders ?? []).map((name) => {
+              const folderId = icloudCustomFolderId(name);
+              return (
+                <SidebarMenuItem key={name}>
+                  <ContextMenu>
+                    <ContextMenuTrigger asChild>
+                      <SidebarMenuButton
+                        tooltip={name}
+                        isActive={folderId === activeFolder}
+                        onClick={() => onSelectFolder(folderId)}
+                      >
+                        <Folder />
+                        <span>{name}</span>
+                      </SidebarMenuButton>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      <ContextMenuItem
+                        variant="destructive"
+                        onSelect={() => setDeleteFolderTarget(name)}
+                      >
+                        <Trash2 />
+                        Delete folder
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+        </SidebarGroup>
+        )}
         {(!online || pendingCount > 0) && (
           <SidebarGroup className="mt-auto">
             <div className="text-muted-foreground flex items-center gap-2 px-2 py-1 text-xs">
@@ -406,6 +491,68 @@ export function MailSidebar({
                 disabled={!newTagName.trim() || createTagMutation.isPending}
               >
                 {createTagMutation.isPending ? "Creating…" : "Create"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog
+        open={deleteFolderTarget !== null}
+        onOpenChange={(open) => !open && setDeleteFolderTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete folder “{deleteFolderTarget}”?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              The folder and every mail in it are deleted on the server.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() =>
+                deleteFolderTarget &&
+                deleteFolderMutation.mutate(deleteFolderTarget)
+              }
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <Dialog open={newFolderOpen} onOpenChange={setNewFolderOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = newFolderName.trim();
+              if (name) createFolderMutation.mutate(name);
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>New folder</DialogTitle>
+            </DialogHeader>
+            <Input
+              autoFocus
+              placeholder="Folder name"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+            />
+            {createFolderMutation.isError && (
+              <p className="text-destructive text-xs">
+                {/* invoke() rejects with a plain string, not an Error */}
+                Could not create folder: {String(createFolderMutation.error)}
+              </p>
+            )}
+            <DialogFooter>
+              <Button
+                type="submit"
+                disabled={!newFolderName.trim() || createFolderMutation.isPending}
+              >
+                {createFolderMutation.isPending ? "Creating…" : "Create"}
               </Button>
             </DialogFooter>
           </form>

@@ -4,14 +4,17 @@ import { queryOptions, useQueryClient } from "@tanstack/react-query";
 
 import {
   archiveMessage,
+  junkMessage,
   markRead,
   markUnread,
+  notJunkMessage,
   sendMessage,
   trashMessage,
   type OutgoingMail,
 } from "@/lib/gmail";
 import {
   ICLOUD_FOLDER_NAMES,
+  icloudMarkJunk,
   icloudMarkRead,
   icloudMoveMessage,
   icloudSendMessage,
@@ -21,7 +24,13 @@ import {
 // (pending_ops), applied to the local cache immediately, and replayed against
 // the provider when connectivity returns. Replay order = enqueue order.
 
-type MailActionKind = "archive" | "trash" | "read" | "unread";
+type MailActionKind =
+  | "archive"
+  | "trash"
+  | "read"
+  | "unread"
+  | "junk"
+  | "notJunk";
 
 interface PendingOp {
   id: number;
@@ -125,6 +134,20 @@ export async function queueIcloudAction(
     }).catch(() => {});
     return;
   }
+  if (action === "junk" || action === "notJunk") {
+    await enqueueOp("icloud:junk", {
+      accountId,
+      folder,
+      uid,
+      junk: action === "junk",
+    });
+    await invoke("cache_remove_message", {
+      account_id: accountId,
+      folder,
+      uid,
+    }).catch(() => {});
+    return;
+  }
   const targetFolder =
     action === "archive" ? ICLOUD_FOLDER_NAMES.archive : ICLOUD_FOLDER_NAMES.trash;
   await enqueueOp("icloud:move", { accountId, folder, uid, targetFolder });
@@ -146,12 +169,18 @@ function runOp(op: PendingOp): Promise<unknown> {
       return archiveMessage(p.id);
     case "gmail:trash":
       return trashMessage(p.id);
+    case "gmail:junk":
+      return junkMessage(p.id);
+    case "gmail:notJunk":
+      return notJunkMessage(p.id);
     case "gmail:send":
       return sendMessage(p as OutgoingMail);
     case "icloud:read":
       return icloudMarkRead(p.accountId, p.folder, p.uid, p.read);
     case "icloud:move":
       return icloudMoveMessage(p.accountId, p.folder, p.uid, p.targetFolder);
+    case "icloud:junk":
+      return icloudMarkJunk(p.accountId, p.folder, p.uid, p.junk);
     case "icloud:send":
       return icloudSendMessage(p as IcloudSendPayload);
     default:
