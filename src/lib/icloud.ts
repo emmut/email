@@ -15,7 +15,23 @@ export const ICLOUD_FOLDER_NAMES: Record<string, string> = {
   archive: "Archive",
 };
 
+// Custom (user-created) mailboxes get sidebar folder ids of the form
+// "icloud-mbx:<mailbox name>", analogous to Gmail's tag folder ids.
+const CUSTOM_FOLDER_PREFIX = "icloud-mbx:";
+
+export function icloudCustomFolderId(mailbox: string): string {
+  return `${CUSTOM_FOLDER_PREFIX}${mailbox}`;
+}
+
+export function icloudMailboxFromFolder(folder: string): string | null {
+  return folder.startsWith(CUSTOM_FOLDER_PREFIX)
+    ? folder.slice(CUSTOM_FOLDER_PREFIX.length)
+    : null;
+}
+
 export function icloudFolderName(folder: string): string {
+  const custom = icloudMailboxFromFolder(folder);
+  if (custom) return custom;
   return ICLOUD_FOLDER_NAMES[folder] ?? ICLOUD_FOLDER_NAMES.inbox;
 }
 
@@ -169,6 +185,32 @@ export function icloudMessageBodyQuery(accountId: string, folder: string, uid: n
     },
     enabled: !!accountId && !!folder && uid > 0,
     staleTime: Infinity,
+  });
+}
+
+// User-created mailboxes for the sidebar "Folders" group — everything on the
+// server minus the standard mailboxes already shown as fixed folders.
+export function icloudFoldersQuery(accountId: string) {
+  const standard = new Set(Object.values(ICLOUD_FOLDER_NAMES));
+  return queryOptions({
+    queryKey: ["icloud", accountId, "folders"],
+    queryFn: async (): Promise<string[]> => {
+      try {
+        const all = await invoke<string[]>("icloud_list_folders", {
+          account_id: accountId,
+        });
+        const custom = all.filter((name) => !standard.has(name));
+        cachePut(`icloud:folders:${accountId}`, custom);
+        return custom;
+      } catch (err) {
+        // Offline — fall back to the last known folder list.
+        const cached = await cacheGet<string[]>(`icloud:folders:${accountId}`);
+        if (cached) return cached;
+        throw err;
+      }
+    },
+    enabled: !!accountId,
+    staleTime: 5 * 60_000,
   });
 }
 

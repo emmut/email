@@ -970,6 +970,21 @@ pub async fn icloud_move_message(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn icloud_list_folders(
+    state: State<'_, AccountState>,
+    pool: State<'_, ImapPool>,
+    account_id: String,
+) -> Result<Vec<String>, String> {
+    let config = get_icloud_config(&state, &account_id).await?;
+    let pool = pool.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_imap(&pool, &account_id, &config, list_folders_blocking)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_folder_counts(
     state: State<'_, AccountState>,
     pool: State<'_, ImapPool>,
@@ -1343,6 +1358,22 @@ fn move_message_blocking(
             .map_err(|e| format!("expunge failed: {e}"))?;
     }
     Ok(())
+}
+
+/// All selectable mailboxes on the server (IMAP LIST). The frontend filters
+/// out the standard ones it already renders as fixed sidebar folders.
+fn list_folders_blocking(session: &mut ImapSession) -> Result<Vec<String>, String> {
+    use imap::types::NameAttribute;
+    let names = session
+        .list(None, Some("*"))
+        .map_err(|e| format!("list folders failed: {e}"))?;
+    let mut folders: Vec<String> = names
+        .iter()
+        .filter(|n| !n.attributes().contains(&NameAttribute::NoSelect))
+        .map(|n| n.name().to_string())
+        .collect();
+    folders.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    Ok(folders)
 }
 
 /// Badge counts keyed by app folder id: unread for inbox/junk, totals for

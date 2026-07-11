@@ -235,6 +235,7 @@ pub fn run() {
             account::icloud_mark_read,
             account::icloud_move_message,
             account::icloud_folder_counts,
+            account::icloud_list_folders,
             account::icloud_cached_messages,
             account::cache_get_json,
             account::cache_put_json,

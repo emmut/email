@@ -4,6 +4,7 @@ import {
   ArchiveX,
   ChevronsUpDown,
   File,
+  Folder,
   Inbox,
   LogOut,
   Plus,
@@ -80,7 +81,11 @@ import {
   tagsQuery,
   type Tag,
 } from "@/lib/gmail";
-import { icloudFolderCountsQuery } from "@/lib/icloud";
+import {
+  icloudCustomFolderId,
+  icloudFolderCountsQuery,
+  icloudFoldersQuery,
+} from "@/lib/icloud";
 import { pendingOpsQuery, useOnline } from "@/lib/offline";
 import { invoke } from "@tauri-apps/api/core";
 import { CloudOff } from "lucide-react";
@@ -124,6 +129,10 @@ export function MailSidebar({
   });
   const counts = isIcloud ? icloudCounts : gmailCounts;
   const { data: tags } = useQuery({ ...tagsQuery, enabled: !isIcloud });
+  const { data: icloudFolders } = useQuery({
+    ...icloudFoldersQuery(activeAccount?.id ?? ""),
+    enabled: isIcloud,
+  });
   const { data: avatar } = useQuery({ ...avatarQuery, enabled: !isIcloud });
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
@@ -332,6 +341,28 @@ export function MailSidebar({
                       </ContextMenuItem>
                     </ContextMenuContent>
                   </ContextMenu>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+        </SidebarGroup>
+        )}
+        {isIcloud && (icloudFolders?.length ?? 0) > 0 && (
+        <SidebarGroup>
+          <SidebarGroupLabel>Folders</SidebarGroupLabel>
+          <SidebarMenu>
+            {(icloudFolders ?? []).map((name) => {
+              const folderId = icloudCustomFolderId(name);
+              return (
+                <SidebarMenuItem key={name}>
+                  <SidebarMenuButton
+                    tooltip={name}
+                    isActive={folderId === activeFolder}
+                    onClick={() => onSelectFolder(folderId)}
+                  >
+                    <Folder />
+                    <span>{name}</span>
+                  </SidebarMenuButton>
                 </SidebarMenuItem>
               );
             })}

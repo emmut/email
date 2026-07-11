@@ -42,6 +42,7 @@ import {
 import {
   icloudFolderName,
   icloudLocalMessagesQuery,
+  icloudMailboxFromFolder,
   icloudMessagesQuery,
   icloudSearchQuery,
   toMail,
@@ -169,7 +170,7 @@ export function Mail() {
   const activeTagId = tagIdFromFolder(activeFolder);
   const title = activeTagId
     ? (tags?.find((t) => t.id === activeTagId)?.name ?? "Tag")
-    : activeFolder;
+    : (icloudMailboxFromFolder(activeFolder) ?? activeFolder);
 
   const moveSelection = (delta: number) => {
     if (!items.length) return;
