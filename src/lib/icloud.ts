@@ -2,6 +2,7 @@ import DOMPurify from "dompurify";
 import { invoke } from "@tauri-apps/api/core";
 import { queryOptions } from "@tanstack/react-query";
 import { cacheGet, cachePut } from "@/lib/cache";
+import { compareNames } from "@/lib/utils";
 import type { Mail } from "@/components/mail/data";
 import type { Contact, MailBody } from "@/lib/gmail";
 
@@ -199,7 +200,9 @@ export function icloudFoldersQuery(accountId: string) {
         const all = await invoke<string[]>("icloud_list_folders", {
           account_id: accountId,
         });
-        const custom = all.filter((name) => !standard.has(name));
+        const custom = all
+          .filter((name) => !standard.has(name))
+          .sort(compareNames);
         cachePut(`icloud:folders:${accountId}`, custom);
         return custom;
       } catch (err) {
@@ -292,6 +295,26 @@ export function icloudMoveMessage(
     folder,
     uid,
     target_folder: targetFolder,
+  });
+}
+
+// Permanent removal (\Deleted + EXPUNGE) — used from the Trash folder.
+export function icloudDeleteMessage(
+  accountId: string,
+  folder: string,
+  uid: number,
+) {
+  return invoke<void>("icloud_delete_message", {
+    account_id: accountId,
+    folder,
+    uid,
+  });
+}
+
+export function icloudEmptyFolder(accountId: string, folder: string) {
+  return invoke<void>("icloud_empty_folder", {
+    account_id: accountId,
+    folder,
   });
 }
 

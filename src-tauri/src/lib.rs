@@ -1,6 +1,7 @@
 mod account;
 mod db;
 mod oauth;
+mod utf7;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -99,6 +100,7 @@ pub fn run() {
                 &[
                     &MenuItem::with_id(app, "reply", "Reply", true, Some("CmdOrCtrl+R"))?,
                     &MenuItem::with_id(app, "reply_all", "Reply All", true, Some("CmdOrCtrl+Shift+R"))?,
+                    &MenuItem::with_id(app, "forward", "Forward", true, Some("CmdOrCtrl+Shift+F"))?,
                     &PredefinedMenuItem::separator(app)?,
                     &MenuItem::with_id(app, "archive", "Archive", true, None::<&str>)?,
                     &MenuItem::with_id(app, "trash", "Move to Trash", true, None::<&str>)?,
@@ -234,6 +236,8 @@ pub fn run() {
             account::icloud_send_message,
             account::icloud_mark_read,
             account::icloud_move_message,
+            account::icloud_delete_message,
+            account::icloud_empty_folder,
             account::icloud_folder_counts,
             account::icloud_list_folders,
             account::icloud_create_folder,

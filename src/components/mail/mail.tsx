@@ -1,12 +1,35 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, SquarePen } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import {
+  Archive,
+  MailOpen,
+  MailX,
+  Search,
+  SquarePen,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
@@ -31,8 +54,9 @@ import { CommandPalette } from "@/components/mail/command-palette";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
 import { noDialogOpen, useMenuEvents } from "@/hooks/use-menu";
 import { folders } from "@/components/mail/data";
-import { useMailActions } from "@/hooks/use-mail-actions";
+import { useMailActions, type MailAction } from "@/hooks/use-mail-actions";
 import {
+  emptyTrash,
   gmailCachedListQuery,
   mailListQuery,
   tagIdFromFolder,
@@ -40,6 +64,8 @@ import {
   useGmailSync,
 } from "@/lib/gmail";
 import {
+  ICLOUD_FOLDER_NAMES,
+  icloudEmptyFolder,
   icloudFolderName,
   icloudLocalMessagesQuery,
   icloudMailboxFromFolder,
@@ -61,10 +87,16 @@ export function Mail() {
   const [keptReadIds, setKeptReadIds] = useState<Set<string>>(new Set());
   const [helpOpen, setHelpOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Multi-select (checkboxes, Cmd/Ctrl+click); bulk actions act on the set.
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [confirmDeleteChecked, setConfirmDeleteChecked] = useState(false);
+  const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
+  const checkAnchor = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const { activeAccount } = useAccount();
   const isIcloud = activeAccount?.kind === "icloud";
+  const inTrash = activeFolder === "trash";
 
   useGmailSync(!isIcloud);
   useOfflineQueue();
@@ -144,10 +176,25 @@ export function Mail() {
   // Shared optimistic mail actions (provider-aware: Gmail or iCloud).
   const { act } = useMailActions();
 
+  const queryClient = useQueryClient();
+  const emptyTrashMutation = useMutation({
+    mutationFn: () =>
+      isIcloud && activeAccount
+        ? icloudEmptyFolder(activeAccount.id, ICLOUD_FOLDER_NAMES.trash)
+        : emptyTrash(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gmail"] });
+      queryClient.invalidateQueries({ queryKey: ["icloud"] });
+      setSelectedId(null);
+      setCheckedIds(new Set());
+    },
+  });
+
   const selectFolder = (folder: string) => {
     setActiveFolder(folder);
     setSelectedId(null);
     setKeptReadIds(new Set());
+    setCheckedIds(new Set());
   };
 
   const selectMail = (id: string) => {
@@ -165,6 +212,36 @@ export function Mail() {
     (m) => tab === "all" || !m.read || keptReadIds.has(m.id),
   );
   const selected = mails?.find((m) => m.id === selectedId) ?? null;
+
+  // Checkbox/Cmd+click toggles one; Shift+click extends from the last toggle.
+  const toggleCheck = (id: string, range: boolean) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      const anchor = checkAnchor.current;
+      if (range && anchor) {
+        const a = items.findIndex((m) => m.id === anchor);
+        const b = items.findIndex((m) => m.id === id);
+        if (a !== -1 && b !== -1) {
+          for (let i = Math.min(a, b); i <= Math.max(a, b); i++)
+            next.add(items[i].id);
+          return next;
+        }
+      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    checkAnchor.current = id;
+  };
+
+  // Read/unread keeps the selection (chainable); archive/trash consumes it.
+  const actChecked = (action: MailAction) => {
+    if (action === "read" && tab === "unread") {
+      setKeptReadIds((prev) => new Set([...prev, ...checkedIds]));
+    }
+    for (const id of checkedIds) act(action, id);
+    if (action !== "read" && action !== "unread") setCheckedIds(new Set());
+  };
 
   const { data: tags } = useQuery({ ...tagsQuery, enabled: !isIcloud });
   const activeTagId = tagIdFromFolder(activeFolder);
@@ -190,9 +267,17 @@ export function Mail() {
     k: () => moveSelection(-1),
     "/": () => searchRef.current?.focus(),
     u: () => {
-      if (selected?.read) act("unread", selected.id);
+      if (checkedIds.size) actChecked("unread");
+      else if (selected?.read) act("unread", selected.id);
     },
-    Escape: () => setSelectedId(null),
+    i: () => {
+      if (checkedIds.size) actChecked("read");
+      else if (selected && !selected.read) act("read", selected.id);
+    },
+    Escape: () => {
+      if (checkedIds.size) setCheckedIds(new Set());
+      else setSelectedId(null);
+    },
     "?": () => setHelpOpen(true),
   });
 
@@ -205,7 +290,7 @@ export function Mail() {
     redo: () => document.execCommand("redo"),
     archive: () =>
       noDialogOpen() && selected && act("archive", selected.id),
-    trash: () => noDialogOpen() && selected && act("trash", selected.id),
+    // "trash" is handled in MailDisplay (it owns the permanent-delete confirm).
     toggle_read: () =>
       noDialogOpen() &&
       selected &&
@@ -224,6 +309,7 @@ export function Mail() {
           onValueChange={(v) => {
             setTab(v as "all" | "unread");
             setKeptReadIds(new Set());
+            setCheckedIds(new Set());
           }}
           className="flex h-full flex-col gap-0"
         >
@@ -243,6 +329,17 @@ export function Mail() {
               Compose
               <Kbd>C</Kbd>
             </Button>
+            {inTrash && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={emptyTrashMutation.isPending || !items.length}
+                onClick={() => setConfirmEmptyTrash(true)}
+              >
+                <Trash2 className="size-4" />
+                {emptyTrashMutation.isPending ? "Emptying…" : "Empty trash"}
+              </Button>
+            )}
             <TabsList className="ml-auto">
               <TabsTrigger value="all">All mail</TabsTrigger>
               <TabsTrigger value="unread">Unread</TabsTrigger>
@@ -267,6 +364,92 @@ export function Mail() {
           <Separator />
           <ResizablePanelGroup orientation="horizontal" className="flex-1">
             <ResizablePanel defaultSize="40%" minSize="30%">
+              <div className="flex h-full flex-col">
+              {checkedIds.size > 0 && (
+                <>
+                  <div className="flex items-center gap-1 px-4 py-1">
+                    <span className="text-sm font-medium">
+                      {checkedIds.size} selected
+                    </span>
+                    <div className="ml-auto flex items-center">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => actChecked("archive")}
+                          >
+                            <Archive className="size-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Archive</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              inTrash
+                                ? setConfirmDeleteChecked(true)
+                                : actChecked("trash")
+                            }
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {inTrash ? "Delete permanently" : "Move to trash"}
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => actChecked("read")}
+                          >
+                            <MailOpen className="size-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          Mark as read <Kbd>i</Kbd>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => actChecked("unread")}
+                          >
+                            <MailX className="size-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          Mark as unread <Kbd>u</Kbd>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setCheckedIds(new Set())}
+                          >
+                            <X className="size-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          Clear selection <Kbd>Esc</Kbd>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </div>
+                  <Separator />
+                </>
+              )}
+              <div className="min-h-0 flex-1">
               {isPending ? (
                 <MailListSkeleton />
               ) : isError ? (
@@ -287,13 +470,19 @@ export function Mail() {
                   items={items}
                   selectedId={selectedId}
                   onSelect={selectMail}
+                  checkedIds={checkedIds}
+                  onToggleCheck={toggleCheck}
+                  inTrash={inTrash}
                 />
               )}
+              </div>
+              </div>
             </ResizablePanel>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize="60%" minSize="30%">
               <MailDisplay
                 mail={selected}
+                inTrash={inTrash}
                 onDismiss={() => setSelectedId(null)}
               />
             </ResizablePanel>
@@ -303,6 +492,46 @@ export function Mail() {
           draft={composeDraft}
           onClose={() => setComposeDraft(null)}
         />
+        <AlertDialog
+          open={confirmDeleteChecked}
+          onOpenChange={setConfirmDeleteChecked}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete permanently?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {checkedIds.size} message{checkedIds.size === 1 ? " is" : "s are"}{" "}
+                deleted forever. This cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => actChecked("delete")}>
+                Delete permanently
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        <AlertDialog
+          open={confirmEmptyTrash}
+          onOpenChange={setConfirmEmptyTrash}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Empty trash?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Every message in Trash is deleted forever. This cannot be
+                undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => emptyTrashMutation.mutate()}>
+                Empty trash
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         <ShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} />
         <CommandPalette
           open={paletteOpen}
@@ -316,8 +545,10 @@ export function Mail() {
           onSetTab={(t) => {
             setTab(t);
             setKeptReadIds(new Set());
+            setCheckedIds(new Set());
           }}
           onAct={act}
+          onEmptyTrash={() => setConfirmEmptyTrash(true)}
         />
       </SidebarInset>
     </SidebarProvider>

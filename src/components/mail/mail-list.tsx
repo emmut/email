@@ -24,6 +24,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { Mail } from "@/components/mail/data";
@@ -50,12 +51,21 @@ export function MailList({
   items,
   selectedId,
   onSelect,
+  checkedIds,
+  onToggleCheck,
+  inTrash,
 }: {
   items: Mail[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  checkedIds: Set<string>;
+  onToggleCheck: (id: string, range: boolean) => void;
+  inTrash: boolean;
 }) {
-  const [trashTarget, setTrashTarget] = useState<Mail | null>(null);
+  const anyChecked = checkedIds.size > 0;
+  // Permanent deletion (from within Trash) is the only destructive path that
+  // asks first; moving to Trash is instant and recoverable.
+  const [deleteTarget, setDeleteTarget] = useState<Mail | null>(null);
   const { act } = useMailActions();
   const { toggle: toggleTag } = useTagActions();
   const { activeAccount } = useAccount();
@@ -69,16 +79,37 @@ export function MailList({
         {items.map((mail) => (
           <ContextMenu key={mail.id}>
             <ContextMenuTrigger asChild>
-              <button
-                onClick={() => onSelect(mail.id)}
+              {/* div, not button: the row holds a nested checkbox button */}
+              <div
+                role="button"
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey) onToggleCheck(mail.id, false);
+                  else if (e.shiftKey && anyChecked)
+                    onToggleCheck(mail.id, true);
+                  else onSelect(mail.id);
+                }}
                 className={cn(
-                  "flex flex-col items-start gap-2 rounded-lg border p-3 text-left text-sm transition-all hover:bg-accent",
+                  "group flex cursor-pointer flex-col items-start gap-2 rounded-lg border p-3 text-left text-sm transition-all hover:bg-accent select-none",
                   selectedId === mail.id && "bg-muted",
+                  checkedIds.has(mail.id) && "border-primary/50 bg-accent/50",
                 )}
               >
                 <div className="flex w-full flex-col gap-1">
                   <div className="flex items-center">
                     <div className="flex items-center gap-2">
+                      <Checkbox
+                        aria-label="Select message"
+                        checked={checkedIds.has(mail.id)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onToggleCheck(mail.id, e.shiftKey);
+                        }}
+                        className={cn(
+                          "opacity-0 transition-opacity group-hover:opacity-100",
+                          anyChecked && "opacity-100",
+                        )}
+                      />
                       <span className="font-semibold">{mail.name}</span>
                       {!mail.read && (
                         <span className="flex size-2 rounded-full bg-blue-600" />
@@ -111,7 +142,7 @@ export function MailList({
                     ))}
                   </div>
                 ) : null}
-              </button>
+              </div>
             </ContextMenuTrigger>
             <ContextMenuContent>
               <ContextMenuItem onSelect={() => act("archive", mail.id)}>
@@ -120,10 +151,12 @@ export function MailList({
               </ContextMenuItem>
               <ContextMenuItem
                 variant="destructive"
-                onSelect={() => setTrashTarget(mail)}
+                onSelect={() =>
+                  inTrash ? setDeleteTarget(mail) : act("trash", mail.id)
+                }
               >
                 <Trash2 />
-                Move to trash
+                {inTrash ? "Delete permanently" : "Move to trash"}
               </ContextMenuItem>
               {tags?.length ? (
                 <>
@@ -166,23 +199,23 @@ export function MailList({
         ))}
       </div>
       <AlertDialog
-        open={trashTarget !== null}
-        onOpenChange={(open) => !open && setTrashTarget(null)}
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Move to trash?</AlertDialogTitle>
+            <AlertDialogTitle>Delete permanently?</AlertDialogTitle>
             <AlertDialogDescription>
-              “{trashTarget?.subject}” moves to Trash. Trashed mail is deleted
-              permanently after 30 days.
+              “{deleteTarget?.subject}” is deleted forever. This cannot be
+              undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => trashTarget && act("trash", trashTarget.id)}
+              onClick={() => deleteTarget && act("delete", deleteTarget.id)}
             >
-              Move to trash
+              Delete permanently
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

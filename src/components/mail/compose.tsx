@@ -45,13 +45,14 @@ export interface ComposeDraft {
   threadId?: string;
   inReplyTo?: string;
   references?: string;
+  forward?: boolean;
 }
 
 // Gmail signatures are <div> blocks with trailing <br>s and <div><br></div>
 // spacers. TipTap renders a trailing break as an extra blank line, and drops
 // empty <div>s entirely — so strip the breaks, and turn each spacer run into
 // a single <p></p> (which TipTap keeps as one blank line).
-function tidySignature(html: string): string {
+export function tidySignature(html: string): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const isEmpty = (el: Element) =>
     !el.textContent?.trim() && !el.querySelector("img");
@@ -68,7 +69,7 @@ function tidySignature(html: string): string {
   return doc.body.innerHTML;
 }
 
-function htmlToPlain(html: string): string {
+export function htmlToPlain(html: string): string {
   return (
     new DOMParser().parseFromString(html, "text/html").body.textContent ?? ""
   );
@@ -103,7 +104,13 @@ function ComposeForm({
   return (
     <DialogContent className="sm:max-w-2xl">
       <DialogHeader>
-        <DialogTitle>{draft.inReplyTo ? "Reply" : "New message"}</DialogTitle>
+        <DialogTitle>
+          {draft.inReplyTo
+            ? "Reply"
+            : draft.forward
+              ? "Forward"
+              : "New message"}
+        </DialogTitle>
       </DialogHeader>
       {isPending ? (
         <div className="flex flex-col gap-3">

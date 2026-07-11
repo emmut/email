@@ -970,6 +970,54 @@ pub async fn icloud_move_message(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn icloud_delete_message(
+    state: State<'_, AccountState>,
+    cache: State<'_, crate::db::CacheDb>,
+    pool: State<'_, ImapPool>,
+    account_id: String,
+    folder: String,
+    uid: u32,
+) -> Result<(), String> {
+    let config = get_icloud_config(&state, &account_id).await?;
+    let imap = pool.0.clone();
+    let folder_clone = folder.clone();
+    let account = account_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_imap(&imap, &account, &config, |s| {
+            delete_message_blocking(s, &folder_clone, uid)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let _ = cache.delete_messages(&account_id, &folder, &[uid]).await;
+    Ok(())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn icloud_empty_folder(
+    state: State<'_, AccountState>,
+    cache: State<'_, crate::db::CacheDb>,
+    pool: State<'_, ImapPool>,
+    account_id: String,
+    folder: String,
+) -> Result<(), String> {
+    let config = get_icloud_config(&state, &account_id).await?;
+    let imap = pool.0.clone();
+    let folder_clone = folder.clone();
+    let account = account_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_imap(&imap, &account, &config, |s| {
+            empty_folder_blocking(s, &folder_clone)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let uids = cache.list_uids(&account_id, &folder).await.unwrap_or_default();
+    let _ = cache.delete_messages(&account_id, &folder, &uids).await;
+    Ok(())
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_list_folders(
     state: State<'_, AccountState>,
     pool: State<'_, ImapPool>,
@@ -995,7 +1043,8 @@ pub async fn icloud_create_folder(
     let pool = pool.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_imap(&pool, &account_id, &config, |s| {
-            s.create(&name).map_err(|e| format!("create folder failed: {e}"))
+            s.create(crate::utf7::encode(&name))
+                .map_err(|e| format!("create folder failed: {e}"))
         })
     })
     .await
@@ -1013,7 +1062,8 @@ pub async fn icloud_delete_folder(
     let pool = pool.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_imap(&pool, &account_id, &config, |s| {
-            s.delete(&name).map_err(|e| format!("delete folder failed: {e}"))
+            s.delete(crate::utf7::encode(&name))
+                .map_err(|e| format!("delete folder failed: {e}"))
         })
     })
     .await
@@ -1116,7 +1166,7 @@ fn search_messages_blocking(
     limit: usize,
 ) -> Result<Vec<IcloudMessageSummary>, String> {
     session
-        .select(folder)
+        .select(crate::utf7::encode(folder))
         .map_err(|e| format!("select folder failed: {e}"))?;
 
     // Strip quotes/backslashes/control chars — the query lands inside an IMAP
@@ -1185,7 +1235,7 @@ fn sync_messages_blocking(
     known_uids: &[u32],
 ) -> Result<IcloudSyncDelta, String> {
     session
-        .select(folder)
+        .select(crate::utf7::encode(folder))
         .map_err(|e| format!("select folder failed: {e}"))?;
 
     let uid_range = match last_uid {
@@ -1285,7 +1335,7 @@ fn fetch_message_blocking(
     uid: u32,
 ) -> Result<IcloudMessageDetail, String> {
     session
-        .select(folder)
+        .select(crate::utf7::encode(folder))
         .map_err(|e| format!("select folder failed: {e}"))?;
 
     let set = uid.to_string();
@@ -1359,7 +1409,7 @@ fn mark_read_blocking(
     read: bool,
 ) -> Result<(), String> {
     session
-        .select(folder)
+        .select(crate::utf7::encode(folder))
         .map_err(|e| format!("select folder failed: {e}"))?;
     let set = uid.to_string();
     let res = if read {
@@ -1378,13 +1428,14 @@ fn move_message_blocking(
     target_folder: &str,
 ) -> Result<(), String> {
     session
-        .select(folder)
+        .select(crate::utf7::encode(folder))
         .map_err(|e| format!("select folder failed: {e}"))?;
     let set = uid.to_string();
     // iCloud supports UID MOVE; fall back to copy + delete + expunge otherwise.
-    if session.uid_mv(&set, target_folder).is_err() {
+    let target = crate::utf7::encode(target_folder);
+    if session.uid_mv(&set, &target).is_err() {
         session
-            .uid_copy(&set, target_folder)
+            .uid_copy(&set, &target)
             .map_err(|e| format!("copy failed: {e}"))?;
         session
             .uid_store(&set, "+FLAGS (\\Deleted)")
@@ -1393,6 +1444,39 @@ fn move_message_blocking(
             .expunge()
             .map_err(|e| format!("expunge failed: {e}"))?;
     }
+    Ok(())
+}
+
+fn delete_message_blocking(
+    session: &mut ImapSession,
+    folder: &str,
+    uid: u32,
+) -> Result<(), String> {
+    session
+        .select(crate::utf7::encode(folder))
+        .map_err(|e| format!("select folder failed: {e}"))?;
+    session
+        .uid_store(uid.to_string(), "+FLAGS (\\Deleted)")
+        .map_err(|e| format!("delete flag failed: {e}"))?;
+    session
+        .expunge()
+        .map_err(|e| format!("expunge failed: {e}"))?;
+    Ok(())
+}
+
+fn empty_folder_blocking(session: &mut ImapSession, folder: &str) -> Result<(), String> {
+    let mailbox = session
+        .select(crate::utf7::encode(folder))
+        .map_err(|e| format!("select folder failed: {e}"))?;
+    if mailbox.exists == 0 {
+        return Ok(());
+    }
+    session
+        .store("1:*", "+FLAGS (\\Deleted)")
+        .map_err(|e| format!("delete flags failed: {e}"))?;
+    session
+        .expunge()
+        .map_err(|e| format!("expunge failed: {e}"))?;
     Ok(())
 }
 
@@ -1406,7 +1490,7 @@ fn list_folders_blocking(session: &mut ImapSession) -> Result<Vec<String>, Strin
     let mut folders: Vec<String> = names
         .iter()
         .filter(|n| !n.attributes().contains(&NameAttribute::NoSelect))
-        .map(|n| n.name().to_string())
+        .map(|n| crate::utf7::decode(n.name()))
         .collect();
     folders.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
     Ok(folders)

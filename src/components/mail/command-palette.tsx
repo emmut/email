@@ -55,6 +55,7 @@ export function CommandPalette({
   onShowShortcuts,
   onSetTab,
   onAct,
+  onEmptyTrash,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -65,6 +66,7 @@ export function CommandPalette({
   onShowShortcuts: () => void;
   onSetTab: (tab: "all" | "unread") => void;
   onAct: (action: MailAction, id: string) => void;
+  onEmptyTrash: () => void;
 }) {
   const queryClient = useQueryClient();
   const { accounts, activeAccount, activeAccountId, switchAccount } =
@@ -131,6 +133,10 @@ export function CommandPalette({
             <RefreshCw />
             Refresh
           </CommandItem>
+          <CommandItem value="empty trash" onSelect={run(onEmptyTrash)}>
+            <Trash2 />
+            Empty trash
+          </CommandItem>
           <CommandItem onSelect={run(onShowShortcuts)}>
             <Keyboard />
             Keyboard shortcuts
@@ -155,11 +161,13 @@ export function CommandPalette({
                 <CommandItem onSelect={run(() => onAct("unread", selected.id))}>
                   <MailIcon />
                   Mark as unread
+                  <CommandShortcut>U</CommandShortcut>
                 </CommandItem>
               ) : (
                 <CommandItem onSelect={run(() => onAct("read", selected.id))}>
                   <MailOpen />
                   Mark as read
+                  <CommandShortcut>I</CommandShortcut>
                 </CommandItem>
               )}
             </CommandGroup>

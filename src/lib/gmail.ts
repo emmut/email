@@ -5,6 +5,7 @@ import { fetch } from "@tauri-apps/plugin-http";
 import { queryOptions, useQueryClient } from "@tanstack/react-query";
 import { getAccessToken } from "@/lib/auth";
 import { cacheDeletePrefix, cacheGet, cachePut } from "@/lib/cache";
+import { compareNames } from "@/lib/utils";
 import type { Mail } from "@/components/mail/data";
 
 // Gmail is single-account today (legacy OAuth token); the local message store
@@ -275,7 +276,7 @@ export const tagsQuery = queryOptions({
     return res.labels
       .filter((l) => l.type === "user")
       .map((l) => ({ id: l.id, name: l.name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => compareNames(a.name, b.name));
   },
   staleTime: 5 * 60_000,
 });
@@ -483,6 +484,14 @@ export function applyGmailActionToCache(
 ) {
   const ops = ACTION_LABEL_OPS[action];
   return applyGmailLabelChange(id, ops.add, ops.remove);
+}
+
+// Drop a permanently deleted message from the local store.
+export function removeGmailFromCache(id: string) {
+  return invoke("gmail_cache_delete", {
+    account_id: GMAIL_CACHE_ACCOUNT,
+    ids: [id],
+  });
 }
 
 export function mailListQuery(folder: string, search: string) {
@@ -696,6 +705,26 @@ export function archiveMessage(id: string) {
 
 export function trashMessage(id: string) {
   return gmail<Message>(`/messages/${id}/trash`, { method: "POST" });
+}
+
+// Permanent removal — needs the full mail scope, not gmail.modify.
+export function deleteMessage(id: string) {
+  return gmail<void>(`/messages/${id}`, { method: "DELETE" });
+}
+
+export async function emptyTrash() {
+  // batchDelete caps at 1000 ids; page until the trash listing runs dry.
+  for (;;) {
+    const page = await gmail<{ messages?: MessageRef[] }>(
+      "/messages?labelIds=TRASH&maxResults=500",
+    );
+    const ids = (page.messages ?? []).map((m) => m.id);
+    if (!ids.length) return;
+    await gmail<void>("/messages/batchDelete", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+  }
 }
 
 export function markRead(id: string) {
