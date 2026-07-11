@@ -985,6 +985,42 @@ pub async fn icloud_list_folders(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn icloud_create_folder(
+    state: State<'_, AccountState>,
+    pool: State<'_, ImapPool>,
+    account_id: String,
+    name: String,
+) -> Result<(), String> {
+    let config = get_icloud_config(&state, &account_id).await?;
+    let pool = pool.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_imap(&pool, &account_id, &config, |s| {
+            s.create(&name).map_err(|e| format!("create folder failed: {e}"))
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn icloud_delete_folder(
+    state: State<'_, AccountState>,
+    pool: State<'_, ImapPool>,
+    account_id: String,
+    name: String,
+) -> Result<(), String> {
+    let config = get_icloud_config(&state, &account_id).await?;
+    let pool = pool.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_imap(&pool, &account_id, &config, |s| {
+            s.delete(&name).map_err(|e| format!("delete folder failed: {e}"))
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn icloud_folder_counts(
     state: State<'_, AccountState>,
     pool: State<'_, ImapPool>,

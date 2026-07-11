@@ -214,6 +214,14 @@ export function icloudFoldersQuery(accountId: string) {
   });
 }
 
+export function icloudCreateFolder(accountId: string, name: string) {
+  return invoke<void>("icloud_create_folder", { account_id: accountId, name });
+}
+
+export function icloudDeleteFolder(accountId: string, name: string) {
+  return invoke<void>("icloud_delete_folder", { account_id: accountId, name });
+}
+
 // Sidebar badge counts keyed by app folder id (inbox/junk unread, drafts total).
 export function icloudFolderCountsQuery(accountId: string) {
   return queryOptions({
