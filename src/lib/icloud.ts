@@ -304,6 +304,28 @@ export function toMail(msg: IcloudMessageSummary): Mail {
 }
 
 
+// --- avatar ---
+
+// Apple exposes no profile-photo API for app-specific passwords (IMAP/SMTP
+// only), so the best available avatar is a Gravatar keyed by the email hash.
+// d=404 makes a missing Gravatar fail the <img> load, which drops the Radix
+// Avatar back to the initials fallback.
+export function icloudAvatarQuery(email: string) {
+  return queryOptions({
+    queryKey: ["icloud", "avatar", email],
+    queryFn: async (): Promise<string> => {
+      const bytes = new TextEncoder().encode(email.trim().toLowerCase());
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const hash = Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+      return `https://www.gravatar.com/avatar/${hash}?s=160&d=404`;
+    },
+    enabled: !!email,
+    staleTime: Infinity,
+  });
+}
+
 // --- contacts ---
 
 // IMAP has no contacts API; the local message cache (senders + recipients)

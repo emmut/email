@@ -82,6 +82,7 @@ import {
   type Tag,
 } from "@/lib/gmail";
 import {
+  icloudAvatarQuery,
   icloudCustomFolderId,
   icloudFolderCountsQuery,
   icloudFoldersQuery,
@@ -133,7 +134,12 @@ export function MailSidebar({
     ...icloudFoldersQuery(activeAccount?.id ?? ""),
     enabled: isIcloud,
   });
-  const { data: avatar } = useQuery({ ...avatarQuery, enabled: !isIcloud });
+  const { data: gmailAvatar } = useQuery({ ...avatarQuery, enabled: !isIcloud });
+  const { data: icloudAvatar } = useQuery({
+    ...icloudAvatarQuery(activeAccount?.email ?? ""),
+    enabled: isIcloud,
+  });
+  const avatar = isIcloud ? icloudAvatar : gmailAvatar;
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Tag | null>(null);
