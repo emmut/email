@@ -251,6 +251,56 @@ export function useMailActions(onRemoved?: (id: string) => void) {
   };
 }
 
+// Move an iCloud message to an arbitrary mailbox (context-menu "Move to
+// folder"). Optimistic like archive: the card leaves the current list at
+// once and comes back if the server says no. Not offline-queued.
+export function useMoveToFolder() {
+  const queryClient = useQueryClient();
+  const { activeAccount } = useAccount();
+
+  const mutation = useMutation({
+    mutationFn: async ({ id, target }: { id: string; target: string }) => {
+      const ref = parseIcloudMailId(id);
+      if (!ref || !activeAccount) {
+        throw new Error("moving to a folder requires an iCloud account");
+      }
+      await icloudMoveMessage(activeAccount.id, ref.folder, ref.uid, target);
+    },
+    onMutate: async ({ id }) => {
+      const ref = parseIcloudMailId(id);
+      if (!ref || !activeAccount) return { previous: undefined };
+      const listKey = ["icloud", activeAccount.id, "messages"];
+      await queryClient.cancelQueries({ queryKey: listKey });
+      const previous = queryClient.getQueriesData<IcloudMessageSummary[]>({
+        queryKey: listKey,
+      });
+      queryClient.setQueriesData<IcloudMessageSummary[]>(
+        { queryKey: listKey },
+        (old) =>
+          old?.filter((m) => !(m.uid === ref.uid && m.folder === ref.folder)),
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      context?.previous?.forEach(([key, data]) =>
+        queryClient.setQueryData(key, data),
+      );
+    },
+    onSuccess: () => {
+      if (!activeAccount) return;
+      // Reconcile the destination folder's list and the badge counts.
+      queryClient.invalidateQueries({
+        queryKey: ["icloud", activeAccount.id],
+      });
+    },
+  });
+
+  return {
+    moveTo: (id: string, target: string) => mutation.mutate({ id, target }),
+    error: mutation.error,
+  };
+}
+
 function addTagToMail(mail: Mail, tag: Tag): Mail {
   return {
     ...mail,

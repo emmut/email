@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { Archive, MailOpen, MailX, Tag as TagIcon, Trash2 } from "lucide-react";
+import {
+  Archive,
+  Folder as FolderIcon,
+  MailOpen,
+  MailX,
+  Tag as TagIcon,
+  Trash2,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -29,7 +36,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { Mail } from "@/components/mail/data";
 import { tagsQuery } from "@/lib/gmail";
-import { useMailActions, useTagActions } from "@/hooks/use-mail-actions";
+import {
+  ICLOUD_FOLDER_NAMES,
+  icloudFoldersQuery,
+  parseIcloudMailId,
+} from "@/lib/icloud";
+import {
+  useMailActions,
+  useMoveToFolder,
+  useTagActions,
+} from "@/hooks/use-mail-actions";
 import { useAccount } from "@/context/AccountContext";
 
 function formatDate(iso: string) {
@@ -68,16 +84,25 @@ export function MailList({
   const [deleteTarget, setDeleteTarget] = useState<Mail | null>(null);
   const { act, error: actError } = useMailActions();
   const { toggle: toggleTag } = useTagActions();
+  const { moveTo, error: moveError } = useMoveToFolder();
   const { activeAccount } = useAccount();
   const isIcloud = activeAccount?.kind === "icloud";
   // Tags are a Gmail feature.
   const { data: tags } = useQuery({ ...tagsQuery, enabled: !isIcloud });
+  // "Move to folder" targets: Inbox plus the user's custom mailboxes.
+  const { data: customFolders } = useQuery({
+    ...icloudFoldersQuery(activeAccount?.id ?? ""),
+    enabled: isIcloud,
+  });
+  const moveTargets = isIcloud
+    ? [ICLOUD_FOLDER_NAMES.inbox, ...(customFolders ?? [])]
+    : [];
 
   return (
     <ScrollArea className="h-full">
-      {actError && (
+      {(actError || moveError) && (
         <p className="text-destructive px-4 pt-3 text-xs">
-          Action failed: {actError.message}
+          Action failed: {(actError ?? moveError)?.message}
         </p>
       )}
       <div className="flex flex-col gap-2 p-4">
@@ -163,6 +188,32 @@ export function MailList({
                 <Trash2 />
                 {inTrash ? "Delete permanently" : "Move to trash"}
               </ContextMenuItem>
+              {moveTargets.length ? (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger>
+                      <FolderIcon />
+                      Move to folder
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent>
+                      {moveTargets.map((target) => (
+                        <ContextMenuItem
+                          key={target}
+                          disabled={
+                            parseIcloudMailId(mail.id)?.folder === target
+                          }
+                          onSelect={() => moveTo(mail.id, target)}
+                        >
+                          {target === ICLOUD_FOLDER_NAMES.inbox
+                            ? "Inbox"
+                            : target}
+                        </ContextMenuItem>
+                      ))}
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                </>
+              ) : null}
               {/* Guard on the account too: a disabled query still surfaces
                   cached Gmail tags after switching to an iCloud account. */}
               {!isIcloud && tags?.length ? (

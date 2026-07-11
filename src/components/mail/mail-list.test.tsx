@@ -8,11 +8,13 @@ import { mail } from "@/test/fixtures";
 const spies = vi.hoisted(() => ({
   act: vi.fn(),
   toggleTag: vi.fn(),
+  moveTo: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-mail-actions", () => ({
-  useMailActions: () => ({ act: spies.act, isPending: false }),
+  useMailActions: () => ({ act: spies.act, isPending: false, error: null }),
   useTagActions: () => ({ toggle: spies.toggleTag }),
+  useMoveToFolder: () => ({ moveTo: spies.moveTo, error: null }),
 }));
 
 // iCloud account → the Gmail tags query stays disabled.
@@ -101,6 +103,15 @@ describe("MailList", () => {
     fireEvent.click(screen.getAllByRole("checkbox")[0]);
     expect(onToggleCheck).toHaveBeenCalledWith("m1", false);
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("offers Move to folder with custom mailboxes on iCloud", () => {
+    const client = new QueryClient();
+    client.setQueryData(["icloud", "a1", "folders"], ["Kvitton", "Resor"]);
+    renderList({}, client);
+
+    fireEvent.contextMenu(row("Alice"));
+    expect(screen.getByText("Move to folder")).toBeInTheDocument();
   });
 
   it("hides Gmail tags in the context menu on an iCloud account", () => {
