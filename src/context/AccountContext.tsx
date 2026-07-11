@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { useQuery, useMutation, QueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { accountsQuery, googleAccessTokenQuery } from "@/lib/accounts";
+import { resetGoogleAccountId } from "@/lib/auth";
 import type { Account } from "@/types/account";
 
 interface AccountContextValue {
@@ -58,7 +59,10 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
   const addGoogleAccount = useMutation({
     mutationFn: () => invoke<Account>("add_google_account", { display_name: undefined }),
     onSuccess: () => {
+      resetGoogleAccountId();
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      // Fresh grant: any lists that failed under the old token can retry.
+      queryClient.invalidateQueries({ queryKey: ["gmail"] });
     },
   });
 
@@ -81,6 +85,7 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
   const removeAccount = useMutation({
     mutationFn: (id: string) => invoke("remove_account", { account_id: id }),
     onSuccess: (_, id) => {
+      resetGoogleAccountId();
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
       if (activeAccountId === id) {
         // Switch to another account if available
