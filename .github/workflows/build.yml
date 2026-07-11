@@ -44,8 +44,14 @@ jobs:
       - name: Typecheck frontend
         run: pnpm exec tsc --noEmit
 
+      - name: Frontend tests
+        run: pnpm exec vitest run
+
       - name: Cargo check
         run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Cargo tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
 
   build:
     permissions:
