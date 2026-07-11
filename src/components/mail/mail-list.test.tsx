@@ -30,11 +30,14 @@ const items = [
   mail({ id: "m3", name: "Carol", subject: "Third" }),
 ];
 
-function renderList(props: Partial<Parameters<typeof MailList>[0]> = {}) {
+function renderList(
+  props: Partial<Parameters<typeof MailList>[0]> = {},
+  client = new QueryClient(),
+) {
   const onSelect = vi.fn();
   const onToggleCheck = vi.fn();
   render(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={client}>
       <MailList
         items={items}
         selectedId={null}
@@ -98,6 +101,18 @@ describe("MailList", () => {
     fireEvent.click(screen.getAllByRole("checkbox")[0]);
     expect(onToggleCheck).toHaveBeenCalledWith("m1", false);
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("hides Gmail tags in the context menu on an iCloud account", () => {
+    // A disabled query still returns cached data: seed the cache as if a
+    // Gmail account had been active before the switch to iCloud.
+    const client = new QueryClient();
+    client.setQueryData(["gmail", "tags"], [{ id: "Label_1", name: "Work" }]);
+    renderList({}, client);
+
+    fireEvent.contextMenu(row("Alice"));
+    expect(screen.getByText("Archive")).toBeInTheDocument(); // menu is open
+    expect(screen.queryByText("Tags")).not.toBeInTheDocument();
   });
 
   it("reflects checked state on the checkboxes", () => {

@@ -163,7 +163,9 @@ export function MailList({
                 <Trash2 />
                 {inTrash ? "Delete permanently" : "Move to trash"}
               </ContextMenuItem>
-              {tags?.length ? (
+              {/* Guard on the account too: a disabled query still surfaces
+                  cached Gmail tags after switching to an iCloud account. */}
+              {!isIcloud && tags?.length ? (
                 <>
                   <ContextMenuSeparator />
                   <ContextMenuSub>

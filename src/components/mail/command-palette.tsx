@@ -188,7 +188,9 @@ export function CommandPalette({
               </CommandItem>
             );
           })}
-          {(tags ?? []).map((tag) => (
+          {/* Same guard as the list: disabled queries still return cached
+              Gmail tags after switching to an iCloud account. */}
+          {(isIcloud ? [] : (tags ?? [])).map((tag) => (
             <CommandItem
               key={tag.id}
               value={`go to tag ${tag.name}`}
