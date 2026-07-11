@@ -66,7 +66,7 @@ export function MailList({
   // Permanent deletion (from within Trash) is the only destructive path that
   // asks first; moving to Trash is instant and recoverable.
   const [deleteTarget, setDeleteTarget] = useState<Mail | null>(null);
-  const { act } = useMailActions();
+  const { act, error: actError } = useMailActions();
   const { toggle: toggleTag } = useTagActions();
   const { activeAccount } = useAccount();
   const isIcloud = activeAccount?.kind === "icloud";
@@ -75,6 +75,11 @@ export function MailList({
 
   return (
     <ScrollArea className="h-full">
+      {actError && (
+        <p className="text-destructive px-4 pt-3 text-xs">
+          Action failed: {actError.message}
+        </p>
+      )}
       <div className="flex flex-col gap-2 p-4">
         {items.map((mail) => (
           <ContextMenu key={mail.id}>

@@ -174,7 +174,7 @@ export function Mail() {
   const { error, refetch } = networkQuery;
 
   // Shared optimistic mail actions (provider-aware: Gmail or iCloud).
-  const { act } = useMailActions();
+  const { act, error: actError } = useMailActions();
 
   const queryClient = useQueryClient();
   const emptyTrashMutation = useMutation({
@@ -365,6 +365,12 @@ export function Mail() {
           <ResizablePanelGroup orientation="horizontal" className="flex-1">
             <ResizablePanel defaultSize="40%" minSize="30%">
               <div className="flex h-full flex-col">
+              {(actError || emptyTrashMutation.error) && (
+                <p className="text-destructive border-b px-4 py-2 text-xs">
+                  Action failed:{" "}
+                  {(actError ?? emptyTrashMutation.error)?.message}
+                </p>
+              )}
               {checkedIds.size > 0 && (
                 <>
                   <div className="flex items-center gap-1 px-4 py-1">

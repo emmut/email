@@ -245,6 +245,9 @@ export function useMailActions(onRemoved?: (id: string) => void) {
   return {
     act: (action: MailAction, id: string) => mutation.mutate({ action, id }),
     isPending: mutation.isPending,
+    // Failures roll the optimistic update back; surface why so a "nothing
+    // happened" (e.g. denied permanent delete) isn't silent.
+    error: mutation.error,
   };
 }
 

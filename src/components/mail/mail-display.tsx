@@ -183,7 +183,7 @@ export function MailDisplay({
     setDraft(forwardDraft(bodyQuery.data));
   };
 
-  const { act, isPending } = useMailActions(() => onDismiss());
+  const { act, isPending, error: actError } = useMailActions(() => onDismiss());
 
   // Trash is instant (recoverable for 30 days); deleting from within Trash
   // is forever, so that one asks first.
@@ -341,6 +341,11 @@ export function MailDisplay({
         </div>
       </div>
       <ComposeDialog draft={draft} onClose={() => setDraft(null)} />
+      {actError && (
+        <p className="text-destructive px-4 pb-2 text-xs">
+          Action failed: {actError.message}
+        </p>
+      )}
       <Separator />
       <div className="flex items-start gap-4 p-4">
         <Avatar>

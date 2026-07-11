@@ -707,23 +707,47 @@ export function trashMessage(id: string) {
   return gmail<Message>(`/messages/${id}/trash`, { method: "POST" });
 }
 
+// Accounts authorized before the full-mail scope was adopted hold tokens that
+// can modify but not delete; Google answers 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT
+// until the user re-consents. Translate that to an actionable message.
+function withScopeHint(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    msg.startsWith("Google API 403") &&
+    /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient/i.test(msg)
+  ) {
+    return new Error(
+      "Google denied permanent deletion: this sign-in predates the delete permission. Sign out and sign in again to grant it.",
+    );
+  }
+  return err instanceof Error ? err : new Error(msg);
+}
+
 // Permanent removal — needs the full mail scope, not gmail.modify.
-export function deleteMessage(id: string) {
-  return gmail<void>(`/messages/${id}`, { method: "DELETE" });
+export async function deleteMessage(id: string) {
+  try {
+    await gmail<void>(`/messages/${id}`, { method: "DELETE" });
+  } catch (err) {
+    throw withScopeHint(err);
+  }
 }
 
 export async function emptyTrash() {
-  // batchDelete caps at 1000 ids; page until the trash listing runs dry.
-  for (;;) {
-    const page = await gmail<{ messages?: MessageRef[] }>(
-      "/messages?labelIds=TRASH&maxResults=500",
-    );
-    const ids = (page.messages ?? []).map((m) => m.id);
-    if (!ids.length) return;
-    await gmail<void>("/messages/batchDelete", {
-      method: "POST",
-      body: JSON.stringify({ ids }),
-    });
+  try {
+    // batchDelete caps at 1000 ids; page until the trash listing runs dry.
+    for (;;) {
+      const page = await gmail<{ messages?: MessageRef[] }>(
+        "/messages?labelIds=TRASH&maxResults=500",
+      );
+      const ids = (page.messages ?? []).map((m) => m.id);
+      if (!ids.length) return;
+      await gmail<void>("/messages/batchDelete", {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      });
+    }
+  } catch (err) {
+    throw withScopeHint(err);
   }
 }
 
