@@ -53,7 +53,34 @@ jobs:
       - name: Cargo tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+  # Create the release once, up front. When each matrix job created it on demand,
+  # jobs finishing at the same time raced: one created a duplicate release for the
+  # tag and its assets were dropped when GitHub discarded the duplicate.
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_NOTES: |
+            ## macOS install
+            The app is not notarized. After copying it to Applications, clear the quarantine flag:
+            ```
+            xattr -cr /Applications/Email.app
+            ```
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" &>/dev/null; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --notes "$RELEASE_NOTES"
+          fi
+
   build:
+    needs: create-release
+    # create-release is skipped on non-tag refs; only bail if it actually failed
+    if: ${{ !cancelled() && needs.create-release.result != 'failure' }}
     permissions:
       contents: write
     strategy:
@@ -88,7 +115,7 @@ jobs:
       # before checkout so it runs in git mode instead of falling back to the REST API
       - name: Install Arch dependencies
         if: matrix.container
-        run: pacman -Syu --noconfirm git zstd webkit2gtk-4.1 openssl appmenu-gtk-module libayatana-appindicator librsvg xdotool file
+        run: pacman -Syu --noconfirm git github-cli zstd webkit2gtk-4.1 openssl appmenu-gtk-module libayatana-appindicator librsvg xdotool file
 
       - uses: actions/checkout@v7
 
@@ -139,14 +166,12 @@ jobs:
 
       - name: Attach bundles to release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
-        with:
-          files: ${{ matrix.release_files }}
-          draft: false
-          fail_on_unmatched_files: true
-          body: |
-            ## macOS install
-            The app is not notarized. After copying it to Applications, clear the quarantine flag:
-            ```
-            xattr -cr /Applications/Email.app
-            ```
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_FILES: ${{ matrix.release_files }}
+        # failglob makes an unmatched pattern an error instead of a silent skip
+        run: |
+          shopt -s failglob
+          gh release upload "$GITHUB_REF_NAME" $RELEASE_FILES --clobber
