@@ -10,6 +10,7 @@ import {
   Plus,
   Send,
   Settings,
+  SlidersHorizontal,
   SquarePen,
   Tag as TagIcon,
   Trash2,
@@ -67,6 +68,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { folders } from "@/components/mail/data";
+import { RulesDialog } from "@/components/mail/rules-dialog";
 import { SignatureDialog } from "@/components/mail/signature-dialog";
 import { useAccount } from "@/context/AccountContext";
 import { cn, isMac } from "@/lib/utils";
@@ -153,6 +155,7 @@ export function MailSidebar({
   const pendingCount = pendingOps?.length ?? 0;
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [signatureOpen, setSignatureOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [addAccountType, setAddAccountType] = useState<"google" | "icloud">("google");
   const [icloudEmail, setIcloudEmail] = useState("");
   const [icloudPassword, setIcloudPassword] = useState("");
@@ -305,6 +308,12 @@ export function MailSidebar({
                   <DropdownMenuItem onSelect={() => setSignatureOpen(true)}>
                     <SquarePen className="size-4" />
                     Edit signature
+                  </DropdownMenuItem>
+                )}
+                {activeAccount && (
+                  <DropdownMenuItem onSelect={() => setRulesOpen(true)}>
+                    <SlidersHorizontal className="size-4" />
+                    Mail rules
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
@@ -559,6 +568,7 @@ export function MailSidebar({
         </DialogContent>
       </Dialog>
       <SignatureDialog open={signatureOpen} onOpenChange={setSignatureOpen} />
+      <RulesDialog open={rulesOpen} onOpenChange={setRulesOpen} />
       <Dialog open={addAccountOpen} onOpenChange={setAddAccountOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>

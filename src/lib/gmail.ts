@@ -619,6 +619,58 @@ export const folderCountsQuery = queryOptions({
   staleTime: 30_000,
 });
 
+// --- server-side filters (settings.filters) ---
+//
+// Mail rules for Gmail are materialized as real Gmail filters so they run on
+// Google's servers on every incoming message, app open or not.
+
+interface GmailFilter {
+  id: string;
+}
+
+// Filter management needs gmail.settings.basic; sign-ins that predate that
+// scope get 403 until the user re-consents.
+function withFilterScopeHint(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    msg.startsWith("Google API 403") &&
+    /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient/i.test(msg)
+  ) {
+    return new Error(
+      "Google denied managing filters: this sign-in predates the rules permission. Sign out and sign in again to grant it.",
+    );
+  }
+  return err instanceof Error ? err : new Error(msg);
+}
+
+export async function createGmailFilter(
+  criteria: { from?: string; to?: string; subject?: string },
+  labelId: string,
+): Promise<string> {
+  try {
+    const filter = await gmail<GmailFilter>("/settings/filters", {
+      method: "POST",
+      body: JSON.stringify({ criteria, action: { addLabelIds: [labelId] } }),
+    });
+    return filter.id;
+  } catch (err) {
+    throw withFilterScopeHint(err);
+  }
+}
+
+export async function deleteGmailFilter(id: string): Promise<void> {
+  try {
+    await gmail<void>(`/settings/filters/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  } catch (err) {
+    // Already gone server-side (deleted from the Gmail UI) — nothing to do.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.startsWith("Google API 404")) return;
+    throw withFilterScopeHint(err);
+  }
+}
+
 // --- signature ---
 
 interface SendAs {
