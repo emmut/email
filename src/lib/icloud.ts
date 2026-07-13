@@ -2,6 +2,7 @@ import DOMPurify from "dompurify";
 import { invoke } from "@tauri-apps/api/core";
 import { queryOptions } from "@tanstack/react-query";
 import { cacheGet, cachePut } from "@/lib/cache";
+import { runIcloudRules } from "@/lib/rules-engine";
 import { compareNames } from "@/lib/utils";
 import type { Mail } from "@/components/mail/data";
 import type { Contact, MailBody } from "@/lib/gmail";
@@ -101,6 +102,11 @@ export function icloudMessagesQuery(accountId: string, folder: string, limit?: n
         });
       } catch (e) {
         syncError = e;
+      }
+      // Fresh inbox state is the moment to apply user rules; failures here
+      // must never break the listing.
+      if (syncError === null && folder === ICLOUD_FOLDER_NAMES.inbox) {
+        await runIcloudRules(accountId).catch(() => {});
       }
       const messages = await invoke<IcloudMessageSummary[]>(
         "icloud_cached_messages",

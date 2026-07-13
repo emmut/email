@@ -19,7 +19,9 @@ pub const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 pub const REVOKE_ENDPOINT: &str = "https://oauth2.googleapis.com/revoke";
 // Full mail scope (not gmail.modify): permanent delete and empty-trash use
 // messages.delete/batchDelete, which gmail.modify does not permit.
-pub const SCOPE: &str = "https://mail.google.com/ https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/userinfo.profile";
+// gmail.settings.basic: mail rules are materialized as server-side Gmail
+// filters (settings.filters), which the full mail scope does not cover.
+pub const SCOPE: &str = "https://mail.google.com/ https://www.googleapis.com/auth/gmail.settings.basic https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/userinfo.profile";
 const KEYCHAIN_SERVICE: &str = "com.emiljansson.email";
 const KEYCHAIN_USER: &str = "gmail-refresh-token";
 const REDIRECT_TIMEOUT: Duration = Duration::from_secs(300);
