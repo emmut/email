@@ -1,17 +1,39 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, X } from "lucide-react";
+import {
+  ArrowRight,
+  Folder,
+  Plus,
+  SlidersHorizontal,
+  Tag as TagIcon,
+  Trash2,
+  X,
+} from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useAccount } from "@/context/AccountContext";
 import { createGmailFilter, deleteGmailFilter, tagsQuery } from "@/lib/gmail";
 import { icloudFoldersQuery } from "@/lib/icloud";
@@ -27,24 +49,6 @@ import {
 import { cn } from "@/lib/utils";
 
 const FIELDS: RuleField[] = ["from", "to", "subject"];
-
-// Native select styled to sit next to shadcn inputs (no Select primitive in
-// the ui kit yet).
-function FieldSelect({
-  className,
-  ...props
-}: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      className={cn(
-        "border-input h-9 rounded-md border bg-transparent px-2 text-sm shadow-xs outline-none",
-        "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
 
 // Manage the active account's mail rules. Gmail rules become server-side
 // Gmail filters (they run even when the app is closed); iCloud rules are
@@ -167,6 +171,7 @@ function RulesForm({
   const duplicateFields =
     new Set(conditions.map((c) => c.field)).size !== conditions.length;
   const error = addRule.error ?? toggleRule.error ?? deleteRule.error;
+  const TargetIcon = isGoogle ? TagIcon : Folder;
 
   return (
     <DialogContent className="sm:max-w-lg">
@@ -174,42 +179,71 @@ function RulesForm({
         <DialogTitle>Mail rules</DialogTitle>
       </DialogHeader>
 
-      <div className="flex flex-col gap-2">
-        {(rules ?? []).length === 0 && (
-          <p className="text-muted-foreground text-sm">No rules yet.</p>
-        )}
-        {(rules ?? []).map((rule) => (
-          <div key={rule.id} className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={rule.enabled}
-              disabled={toggleRule.isPending}
-              onCheckedChange={() => toggleRule.mutate(rule)}
-              aria-label="Rule enabled"
-            />
-            <span className={cn("flex-1 truncate", !rule.enabled && "text-muted-foreground line-through")}>
-              {rule.conditions
-                .map((c) => `${c.field} contains “${c.value}”`)
-                .join(" and ")}{" "}
-              → {targetName(rule)}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7 shrink-0"
-              disabled={deleteRule.isPending}
-              onClick={() => deleteRule.mutate(rule)}
-              aria-label="Delete rule"
-            >
-              <Trash2 />
-            </Button>
-          </div>
-        ))}
-      </div>
-
-      <Separator />
+      {(rules ?? []).length === 0 ? (
+        <Empty className="border border-dashed py-8">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <SlidersHorizontal />
+            </EmptyMedia>
+            <EmptyTitle>No rules yet</EmptyTitle>
+            <EmptyDescription>
+              {isGoogle
+                ? "Rules tag new incoming mail automatically, right on Google's servers."
+                : "Rules file new inbox mail into folders whenever the app syncs."}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <div className="divide-y rounded-lg border">
+          {(rules ?? []).map((rule) => (
+            <div key={rule.id} className="flex items-center gap-3 p-3">
+              <Switch
+                checked={rule.enabled}
+                disabled={toggleRule.isPending}
+                onCheckedChange={() => toggleRule.mutate(rule)}
+                aria-label="Rule enabled"
+              />
+              <div
+                className={cn(
+                  "flex min-w-0 flex-1 flex-wrap items-center gap-1.5",
+                  !rule.enabled && "opacity-50",
+                )}
+              >
+                {rule.conditions.map((c, i) => (
+                  <Fragment key={i}>
+                    {i > 0 && (
+                      <span className="text-muted-foreground text-xs">and</span>
+                    )}
+                    <Badge variant="secondary" className="max-w-44 font-normal">
+                      <span className="truncate">
+                        {c.field}: “{c.value}”
+                      </span>
+                    </Badge>
+                  </Fragment>
+                ))}
+                <ArrowRight className="text-muted-foreground size-3 shrink-0" />
+                <Badge variant="outline" className="max-w-44 font-normal">
+                  <TargetIcon data-icon="inline-start" />
+                  <span className="truncate">{targetName(rule)}</span>
+                </Badge>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground hover:text-destructive shrink-0"
+                disabled={deleteRule.isPending}
+                onClick={() => deleteRule.mutate(rule)}
+                aria-label="Delete rule"
+              >
+                <Trash2 />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <form
-        className="flex flex-col gap-3"
+        className="bg-muted/40 flex flex-col gap-3 rounded-lg border p-3"
         onSubmit={(e) => {
           e.preventDefault();
           if (valid) addRule.mutate();
@@ -218,26 +252,35 @@ function RulesForm({
         <div className="text-sm font-medium">New rule</div>
         {conditions.map((cond, i) => (
           <div key={i} className="flex items-center gap-2">
-            <FieldSelect
+            <Select
               value={cond.field}
-              onChange={(e) =>
+              onValueChange={(field) =>
                 setConditions((cs) =>
                   cs.map((c, j) =>
-                    j === i ? { ...c, field: e.target.value as RuleField } : c,
+                    j === i ? { ...c, field: field as RuleField } : c,
                   ),
                 )
               }
             >
-              {FIELDS.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
-            </FieldSelect>
-            <span className="text-muted-foreground text-sm">contains</span>
+              <SelectTrigger className="w-24 shrink-0" aria-label="Field">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FIELDS.map((f) => (
+                  <SelectItem key={f} value={f}>
+                    {f}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-muted-foreground shrink-0 text-sm">
+              contains
+            </span>
             <Input
               value={cond.value}
-              placeholder={cond.field === "subject" ? "invoice" : "name@example.com"}
+              placeholder={
+                cond.field === "subject" ? "invoice" : "name@example.com"
+              }
               onChange={(e) =>
                 setConditions((cs) =>
                   cs.map((c, j) =>
@@ -250,8 +293,8 @@ function RulesForm({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon"
-                className="size-7 shrink-0"
+                size="icon-sm"
+                className="shrink-0"
                 onClick={() =>
                   setConditions((cs) => cs.filter((_, j) => j !== i))
                 }
@@ -281,26 +324,28 @@ function RulesForm({
                 ])
               }
             >
-              <Plus /> Condition
+              <Plus data-icon="inline-start" /> Condition
             </Button>
           )}
-          <span className="text-muted-foreground ml-auto text-sm">
+          <span className="text-muted-foreground ml-auto shrink-0 text-sm">
             {isGoogle ? "apply tag" : "move to"}
           </span>
-          <FieldSelect
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            className="max-w-40"
-          >
-            <option value="" disabled>
-              {isGoogle ? "Choose tag…" : "Choose folder…"}
-            </option>
-            {targets.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </FieldSelect>
+          <Select value={target} onValueChange={setTarget}>
+            <SelectTrigger
+              className="max-w-44"
+              aria-label={isGoogle ? "Tag" : "Folder"}
+            >
+              <TargetIcon className="text-muted-foreground size-3.5" />
+              <SelectValue placeholder={isGoogle ? "Choose tag…" : "Choose folder…"} />
+            </SelectTrigger>
+            <SelectContent>
+              {targets.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         {targets.length === 0 && (
           <p className="text-muted-foreground text-xs">
