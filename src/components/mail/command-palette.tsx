@@ -166,11 +166,14 @@ export function CommandPalette({
           </CommandItem>
           {activeAccount && !activeAccount.is_default && (
             <CommandItem
-              value="open this account at launch make default"
+              value="make default account open this account at launch"
               onSelect={run(() => setDefaultAccount(activeAccount.id))}
             >
               <Star />
-              Open this account at launch
+              Make default account
+              <CommandShortcut className="tracking-normal">
+                opens at launch
+              </CommandShortcut>
             </CommandItem>
           )}
         </CommandGroup>
