@@ -19,6 +19,8 @@ export interface AppSettings {
   syncIntervalMinutes: number;
   // Ask before permanently deleting mail from Trash.
   confirmPermanentDelete: boolean;
+  // Show a desktop notification when new mail arrives in the inbox.
+  notificationsEnabled: boolean;
   // Per-action overrides of the default single-key shortcuts.
   shortcuts: Partial<Record<ShortcutAction, string>>;
 }
@@ -27,6 +29,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Matches the pre-setting hardcoded 30s poll.
   syncIntervalMinutes: 0.5,
   confirmPermanentDelete: true,
+  notificationsEnabled: true,
   shortcuts: {},
 };
 

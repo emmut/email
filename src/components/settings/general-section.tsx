@@ -68,6 +68,16 @@ export function GeneralSection() {
         </Select>
       </Row>
       <Row
+        title="New mail notifications"
+        description="Show a desktop notification when mail arrives in the inbox."
+      >
+        <Switch
+          checked={settings.notificationsEnabled}
+          onCheckedChange={(on) => update({ notificationsEnabled: on })}
+          aria-label="New mail notifications"
+        />
+      </Row>
+      <Row
         title="Confirm permanent deletion"
         description="Ask before deleting mail forever from Trash."
       >
