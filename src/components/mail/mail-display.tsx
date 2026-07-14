@@ -142,12 +142,12 @@ export function MailDisplay({
   mail,
   inTrash,
   junkAction,
-  onDismiss,
+  onRemoved,
 }: {
   mail: Mail | null;
   inTrash: boolean;
   junkAction: JunkAction;
-  onDismiss: () => void;
+  onRemoved: (id: string) => void;
 }) {
   const keys = useKeys();
   const { settings } = useSettings();
@@ -189,7 +189,7 @@ export function MailDisplay({
     setDraft(forwardDraft(bodyQuery.data));
   };
 
-  const { act, isPending, error: actError } = useMailActions(() => onDismiss());
+  const { act, isPending, error: actError } = useMailActions(onRemoved);
 
   // Trash is instant (recoverable for 30 days); deleting from within Trash
   // is forever, so that one asks first — unless confirmation is turned off

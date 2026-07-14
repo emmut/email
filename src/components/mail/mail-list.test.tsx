@@ -48,6 +48,7 @@ function renderList(
         onToggleCheck={onToggleCheck}
         inTrash={false}
         junkAction="junk"
+        onRemoved={vi.fn()}
         {...props}
       />
     </QueryClientProvider>,
