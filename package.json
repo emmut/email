@@ -14,6 +14,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist": "^5.2.9",
     "@tailwindcss/vite": "^4.3.1",
     "@tanstack/react-query": "^5.101.1",
@@ -31,7 +32,6 @@
     "cmdk": "^1.1.1",
     "dompurify": "^3.4.11",
     "lucide-react": "^1.21.0",
-    "radix-ui": "^1.6.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-resizable-panels": "^4.11.2",

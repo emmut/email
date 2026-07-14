@@ -33,10 +33,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { Mail } from "@/components/mail/data";
 import { Kbd } from "@/components/ui/kbd";
-import {
-  ComposeDialog,
-  type ComposeDraft,
-} from "@/components/mail/compose";
+import { ComposeDialog, type ComposeDraft } from "@/components/mail/compose";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
 import { KEYS } from "@/lib/shortcuts";
 import { noDialogOpen, useMenuEvents } from "@/hooks/use-menu";
@@ -59,10 +56,7 @@ function bareAddress(raw: string): string {
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function quoteOriginal(body: MailBody): string {
@@ -81,7 +75,8 @@ export function replyDraft(
   self: string,
 ): ComposeDraft {
   const notSelf = (addr: string) =>
-    bareAddress(addr) !== self && bareAddress(addr) !== bareAddress(body.replyTo);
+    bareAddress(addr) !== self &&
+    bareAddress(addr) !== bareAddress(body.replyTo);
   const to = all
     ? [body.replyTo, ...splitAddresses(body.to).filter(notSelf)]
     : [body.replyTo];
@@ -179,7 +174,11 @@ export function MailDisplay({
 
   const openReply = (all: boolean) => {
     if (!bodyQuery.data) return;
-    const self = (activeAccount?.email ?? profile?.emailAddress ?? "").toLowerCase();
+    const self = (
+      activeAccount?.email ??
+      profile?.emailAddress ??
+      ""
+    ).toLowerCase();
     setDraft(replyDraft(bodyQuery.data, all, self));
   };
 
@@ -226,31 +225,35 @@ export function MailDisplay({
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 p-2">
         <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              disabled={isPending}
-              onClick={() => act("archive", mail.id)}
-            >
-              <Archive className="size-4" />
-            </Button>
-          </TooltipTrigger>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={isPending}
+                onClick={() => act("archive", mail.id)}
+              >
+                <Archive className="size-4" />
+              </Button>
+            }
+          />
           <TooltipContent>
             Archive <Kbd>{KEYS.archive}</Kbd>
           </TooltipContent>
         </Tooltip>
         <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              disabled={isPending}
-              onClick={trashSelected}
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          </TooltipTrigger>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={isPending}
+                onClick={trashSelected}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            }
+          />
           <TooltipContent>
             {inTrash ? "Delete permanently" : "Move to trash"}{" "}
             <Kbd>{KEYS.trash}</Kbd>
@@ -258,20 +261,22 @@ export function MailDisplay({
         </Tooltip>
         {junkAction && (
           <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={isPending}
-                onClick={() => act(junkAction, mail.id)}
-              >
-                {junkAction === "notJunk" ? (
-                  <ShieldCheck className="size-4" />
-                ) : (
-                  <ShieldAlert className="size-4" />
-                )}
-              </Button>
-            </TooltipTrigger>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={isPending}
+                  onClick={() => act(junkAction, mail.id)}
+                >
+                  {junkAction === "notJunk" ? (
+                    <ShieldCheck className="size-4" />
+                  ) : (
+                    <ShieldAlert className="size-4" />
+                  )}
+                </Button>
+              }
+            />
             <TooltipContent>
               {junkAction === "notJunk" ? "Mark as not junk" : "Mark as junk"}{" "}
               <Kbd>{KEYS.junk}</Kbd>
@@ -279,20 +284,22 @@ export function MailDisplay({
           </Tooltip>
         )}
         <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              disabled={isPending}
-              onClick={() => act(mail.read ? "unread" : "read", mail.id)}
-            >
-              {mail.read ? (
-                <MailX className="size-4" />
-              ) : (
-                <MailOpen className="size-4" />
-              )}
-            </Button>
-          </TooltipTrigger>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={isPending}
+                onClick={() => act(mail.read ? "unread" : "read", mail.id)}
+              >
+                {mail.read ? (
+                  <MailX className="size-4" />
+                ) : (
+                  <MailOpen className="size-4" />
+                )}
+              </Button>
+            }
+          />
           <TooltipContent>
             {mail.read ? (
               <>
@@ -323,46 +330,52 @@ export function MailDisplay({
         </AlertDialog>
         <div className="ml-auto flex items-center gap-2">
           <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={!bodyQuery.data}
-                onClick={() => openReply(false)}
-              >
-                <Reply className="size-4" />
-              </Button>
-            </TooltipTrigger>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={!bodyQuery.data}
+                  onClick={() => openReply(false)}
+                >
+                  <Reply className="size-4" />
+                </Button>
+              }
+            />
             <TooltipContent>
               Reply <Kbd>{KEYS.reply}</Kbd>
             </TooltipContent>
           </Tooltip>
           <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={!bodyQuery.data}
-                onClick={() => openReply(true)}
-              >
-                <ReplyAll className="size-4" />
-              </Button>
-            </TooltipTrigger>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={!bodyQuery.data}
+                  onClick={() => openReply(true)}
+                >
+                  <ReplyAll className="size-4" />
+                </Button>
+              }
+            />
             <TooltipContent>
               Reply all <Kbd>{KEYS.replyAll}</Kbd>
             </TooltipContent>
           </Tooltip>
           <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={!bodyQuery.data}
-                onClick={openForward}
-              >
-                <Forward className="size-4" />
-              </Button>
-            </TooltipTrigger>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={!bodyQuery.data}
+                  onClick={openForward}
+                >
+                  <Forward className="size-4" />
+                </Button>
+              }
+            />
             <TooltipContent>
               Forward <Kbd>{KEYS.forward}</Kbd>
             </TooltipContent>

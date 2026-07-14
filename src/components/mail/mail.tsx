@@ -44,10 +44,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { MailSidebar } from "@/components/mail/mail-sidebar";
-import {
-  ComposeDialog,
-  type ComposeDraft,
-} from "@/components/mail/compose";
+import { ComposeDialog, type ComposeDraft } from "@/components/mail/compose";
 import { MailList } from "@/components/mail/mail-list";
 import { MailDisplay } from "@/components/mail/mail-display";
 import type { Mail as MailItem } from "@/components/mail/data";
@@ -175,7 +172,8 @@ export function Mail() {
     const cached = icloudQuery.data ?? icloudLocal.data;
     listData = debouncedSearch
       ? (icloudSearch.data ?? cached?.filter(matchesSearch))
-      : (icloudQuery.data ?? (icloudLocal.data?.length ? icloudLocal.data : undefined));
+      : (icloudQuery.data ??
+        (icloudLocal.data?.length ? icloudLocal.data : undefined));
   } else {
     listData =
       gmailQuery.data ??
@@ -303,14 +301,10 @@ export function Mail() {
     shortcuts: () => setHelpOpen(true),
     undo: () => document.execCommand("undo"),
     redo: () => document.execCommand("redo"),
-    archive: () =>
-      noDialogOpen() && selected && act("archive", selected.id),
+    archive: () => noDialogOpen() && selected && act("archive", selected.id),
     // "trash" is handled in MailDisplay (it owns the permanent-delete confirm).
     toggle_junk: () =>
-      noDialogOpen() &&
-      selected &&
-      junkAction &&
-      act(junkAction, selected.id),
+      noDialogOpen() && selected && junkAction && act(junkAction, selected.id),
     toggle_read: () =>
       noDialogOpen() &&
       selected &&
@@ -385,146 +379,162 @@ export function Mail() {
           <ResizablePanelGroup orientation="horizontal" className="flex-1">
             <ResizablePanel defaultSize="40%" minSize="30%">
               <div className="flex h-full flex-col">
-              {(actError || emptyTrashMutation.error) && (
-                <p className="text-destructive border-b px-4 py-2 text-xs">
-                  Action failed:{" "}
-                  {(actError ?? emptyTrashMutation.error)?.message}
-                </p>
-              )}
-              {checkedIds.size > 0 && (
-                <>
-                  <div className="flex items-center gap-1 px-4 py-1">
-                    <span className="text-sm font-medium">
-                      {checkedIds.size} selected
-                    </span>
-                    <div className="ml-auto flex items-center">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => actChecked("archive")}
-                          >
-                            <Archive className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Archive</TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() =>
-                              inTrash
-                                ? setConfirmDeleteChecked(true)
-                                : actChecked("trash")
-                            }
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {inTrash ? "Delete permanently" : "Move to trash"}
-                        </TooltipContent>
-                      </Tooltip>
-                      {junkAction && (
+                {(actError || emptyTrashMutation.error) && (
+                  <p className="text-destructive border-b px-4 py-2 text-xs">
+                    Action failed:{" "}
+                    {(actError ?? emptyTrashMutation.error)?.message}
+                  </p>
+                )}
+                {checkedIds.size > 0 && (
+                  <>
+                    <div className="flex items-center gap-1 px-4 py-1">
+                      <span className="text-sm font-medium">
+                        {checkedIds.size} selected
+                      </span>
+                      <div className="ml-auto flex items-center">
                         <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => actChecked(junkAction)}
-                            >
-                              {junkAction === "notJunk" ? (
-                                <ShieldCheck className="size-4" />
-                              ) : (
-                                <ShieldAlert className="size-4" />
-                              )}
-                            </Button>
-                          </TooltipTrigger>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => actChecked("archive")}
+                              >
+                                <Archive className="size-4" />
+                              </Button>
+                            }
+                          />
+                          <TooltipContent>Archive</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() =>
+                                  inTrash
+                                    ? setConfirmDeleteChecked(true)
+                                    : actChecked("trash")
+                                }
+                              >
+                                <Trash2 className="size-4" />
+                              </Button>
+                            }
+                          />
                           <TooltipContent>
-                            {junkAction === "notJunk"
-                              ? "Mark as not junk"
-                              : "Mark as junk"}
+                            {inTrash ? "Delete permanently" : "Move to trash"}
                           </TooltipContent>
                         </Tooltip>
-                      )}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => actChecked("read")}
-                          >
-                            <MailOpen className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          Mark as read <Kbd>{KEYS.markRead}</Kbd>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => actChecked("unread")}
-                          >
-                            <MailX className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          Mark as unread <Kbd>{KEYS.markUnread}</Kbd>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setCheckedIds(new Set())}
-                          >
-                            <X className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          Clear selection <Kbd>Esc</Kbd>
-                        </TooltipContent>
-                      </Tooltip>
+                        {junkAction && (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => actChecked(junkAction)}
+                                >
+                                  {junkAction === "notJunk" ? (
+                                    <ShieldCheck className="size-4" />
+                                  ) : (
+                                    <ShieldAlert className="size-4" />
+                                  )}
+                                </Button>
+                              }
+                            />
+                            <TooltipContent>
+                              {junkAction === "notJunk"
+                                ? "Mark as not junk"
+                                : "Mark as junk"}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => actChecked("read")}
+                              >
+                                <MailOpen className="size-4" />
+                              </Button>
+                            }
+                          />
+                          <TooltipContent>
+                            Mark as read <Kbd>{KEYS.markRead}</Kbd>
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => actChecked("unread")}
+                              >
+                                <MailX className="size-4" />
+                              </Button>
+                            }
+                          />
+                          <TooltipContent>
+                            Mark as unread <Kbd>{KEYS.markUnread}</Kbd>
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setCheckedIds(new Set())}
+                              >
+                                <X className="size-4" />
+                              </Button>
+                            }
+                          />
+                          <TooltipContent>
+                            Clear selection <Kbd>Esc</Kbd>
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
                     </div>
-                  </div>
-                  <Separator />
-                </>
-              )}
-              <div className="min-h-0 flex-1">
-              {isPending ? (
-                <MailListSkeleton />
-              ) : isError ? (
-                <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm">
-                  <p className="text-muted-foreground">
-                    Failed to load mail: {error?.message}
-                  </p>
-                  <Button variant="outline" size="sm" onClick={() => refetch()}>
-                    Retry
-                  </Button>
+                    <Separator />
+                  </>
+                )}
+                <div className="min-h-0 flex-1">
+                  {isPending ? (
+                    <MailListSkeleton />
+                  ) : isError ? (
+                    <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm">
+                      <p className="text-muted-foreground">
+                        Failed to load mail: {error?.message}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => refetch()}
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  ) : items.length === 0 ? (
+                    <div className="text-muted-foreground flex h-full items-center justify-center p-8 text-sm">
+                      No messages
+                    </div>
+                  ) : (
+                    <MailList
+                      items={items}
+                      selectedId={selectedId}
+                      onSelect={selectMail}
+                      checkedIds={checkedIds}
+                      onToggleCheck={toggleCheck}
+                      inTrash={inTrash}
+                      junkAction={junkAction}
+                    />
+                  )}
                 </div>
-              ) : items.length === 0 ? (
-                <div className="text-muted-foreground flex h-full items-center justify-center p-8 text-sm">
-                  No messages
-                </div>
-              ) : (
-                <MailList
-                  items={items}
-                  selectedId={selectedId}
-                  onSelect={selectMail}
-                  checkedIds={checkedIds}
-                  onToggleCheck={toggleCheck}
-                  inTrash={inTrash}
-                  junkAction={junkAction}
-                />
-              )}
-              </div>
               </div>
             </ResizablePanel>
             <ResizableHandle withHandle />
@@ -550,8 +560,9 @@ export function Mail() {
             <AlertDialogHeader>
               <AlertDialogTitle>Delete permanently?</AlertDialogTitle>
               <AlertDialogDescription>
-                {checkedIds.size} message{checkedIds.size === 1 ? " is" : "s are"}{" "}
-                deleted forever. This cannot be undone.
+                {checkedIds.size} message
+                {checkedIds.size === 1 ? " is" : "s are"} deleted forever. This
+                cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -591,7 +602,9 @@ export function Mail() {
           onSelectFolder={selectFolder}
           onCompose={() => setComposeDraft({})}
           // Wait out the dialog's close (Radix restores focus on unmount).
-          onFocusSearch={() => setTimeout(() => searchRef.current?.focus(), 250)}
+          onFocusSearch={() =>
+            setTimeout(() => searchRef.current?.focus(), 250)
+          }
           onShowShortcuts={() => setHelpOpen(true)}
           onSetTab={(t) => {
             setTab(t);
