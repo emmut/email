@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { MailList } from "@/components/mail/mail-list";
+import { isCheckboxClick, MailList } from "@/components/mail/mail-list";
 import { mail } from "@/test/fixtures";
 
 const spies = vi.hoisted(() => ({
@@ -152,7 +152,26 @@ describe("MailList", () => {
   it("reflects checked state on the checkboxes", () => {
     renderList({ checkedIds: new Set(["m2"]) });
     const boxes = screen.getAllByRole("checkbox");
-    expect(boxes[0]).toHaveAttribute("data-state", "unchecked");
-    expect(boxes[1]).toHaveAttribute("data-state", "checked");
+    expect(boxes[0]).toHaveAttribute("data-unchecked");
+    expect(boxes[1]).toHaveAttribute("data-checked");
+  });
+});
+
+describe("isCheckboxClick", () => {
+  it("matches the checkbox root and its hidden input, nothing else", () => {
+    render(
+      <div>
+        <span role="checkbox" aria-checked="false">
+          <svg data-testid="indicator" />
+        </span>
+        <input type="checkbox" data-testid="hidden-input" aria-hidden />
+        <span data-testid="row-text">Subject</span>
+      </div>,
+    );
+    expect(isCheckboxClick(screen.getByRole("checkbox"))).toBe(true);
+    expect(isCheckboxClick(screen.getByTestId("indicator"))).toBe(true);
+    expect(isCheckboxClick(screen.getByTestId("hidden-input"))).toBe(true);
+    expect(isCheckboxClick(screen.getByTestId("row-text"))).toBe(false);
+    expect(isCheckboxClick(null)).toBe(false);
   });
 });

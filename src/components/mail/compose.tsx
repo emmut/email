@@ -212,7 +212,9 @@ function ComposeFields({
   closeGuard: CloseGuard;
 }) {
   const { accounts, activeAccountId } = useAccount();
-  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(activeAccountId);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
+    activeAccountId,
+  );
   const [initialFields] = useState(() => initialHeaderFields(draft));
   const [to, setTo] = useState(initialFields.to);
   const [cc, setCc] = useState(initialFields.cc);
@@ -259,10 +261,14 @@ function ComposeFields({
 
   // Contacts from every connected source, deduped by address (a contact in
   // both keeps the named/Google entry). The list itself shows the origin.
-  const hasGoogle = accounts.length === 0 || accounts.some((a) => a.kind === "google");
+  const hasGoogle =
+    accounts.length === 0 || accounts.some((a) => a.kind === "google");
   const hasIcloud = accounts.some((a) => a.kind === "icloud");
   const googleContacts = useQuery({ ...contactsQuery, enabled: hasGoogle });
-  const icloudContacts = useQuery({ ...icloudContactsQuery, enabled: hasIcloud });
+  const icloudContacts = useQuery({
+    ...icloudContactsQuery,
+    enabled: hasIcloud,
+  });
   const contactsFailed = hasGoogle && googleContacts.isError;
   const contactsError = googleContacts.error;
   const contacts = useMemo(() => {
@@ -360,7 +366,11 @@ function ComposeFields({
   // Closing with unsent edits (Esc, X, click outside) offers to save them.
   // A pristine form — or one whose send is already in flight — just closes.
   const [confirmSave, setConfirmSave] = useState(false);
-  const dirty = hasUnsavedChanges(draft, { to, cc, bcc, subject }, edited.current);
+  const dirty = hasUnsavedChanges(
+    draft,
+    { to, cc, bcc, subject },
+    edited.current,
+  );
   useEffect(() => {
     closeGuard.current = () => {
       if (dirty && !sendMutation.isPending) setConfirmSave(true);
@@ -395,18 +405,22 @@ function ComposeFields({
       }}
     >
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" type="button" className="justify-start">
-            <span className="text-muted-foreground">From:</span>
-            <span className="truncate">{fromLabel}</span>
-          </Button>
-        </DropdownMenuTrigger>
+        <DropdownMenuTrigger
+          render={
+            <Button variant="outline" type="button" className="justify-start">
+              <span className="text-muted-foreground">From:</span>
+              <span className="truncate">{fromLabel}</span>
+            </Button>
+          }
+        />
         <DropdownMenuContent align="start" className="w-80">
           {accounts.map((acc) => (
             <DropdownMenuItem
               key={acc.id}
-              onSelect={() => setSelectedAccountId(acc.id)}
-              className={acc.id === selectedAccountId ? "bg-accent font-medium" : ""}
+              onClick={() => setSelectedAccountId(acc.id)}
+              className={
+                acc.id === selectedAccountId ? "bg-accent font-medium" : ""
+              }
             >
               <span className="flex items-center gap-2 w-full">
                 <span className="text-xs uppercase text-muted-foreground">
@@ -464,13 +478,13 @@ function ComposeFields({
           {tags.map((tag) => (
             <Badge
               key={tag.id}
-              asChild
               variant={tagIds.includes(tag.id) ? "default" : "outline"}
-            >
-              <button type="button" onClick={() => toggleTag(tag.id)}>
-                {tag.name}
-              </button>
-            </Badge>
+              render={
+                <button type="button" onClick={() => toggleTag(tag.id)}>
+                  {tag.name}
+                </button>
+              }
+            />
           ))}
         </div>
       ) : null}

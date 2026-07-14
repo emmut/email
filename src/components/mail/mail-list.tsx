@@ -66,6 +66,16 @@ function labelVariant(label: string): "default" | "outline" | "secondary" {
   return "secondary";
 }
 
+// Base UI's Checkbox re-dispatches clicks on a hidden <input> that is a
+// sibling of the checkbox root, so stopPropagation inside the checkbox never
+// sees that second event — the row filters checkbox clicks out instead.
+export function isCheckboxClick(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest('[role="checkbox"], input[type="checkbox"]') !== null
+  );
+}
+
 export function MailList({
   items,
   selectedId,
@@ -113,80 +123,83 @@ export function MailList({
       <div className="flex flex-col gap-2 p-4">
         {items.map((mail) => (
           <ContextMenu key={mail.id}>
-            <ContextMenuTrigger asChild>
-              {/* div, not button: the row holds a nested checkbox button */}
-              <div
-                role="button"
-                onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey) onToggleCheck(mail.id, false);
-                  else if (e.shiftKey && anyChecked)
-                    onToggleCheck(mail.id, true);
-                  else onSelect(mail.id);
-                }}
-                className={cn(
-                  "group flex cursor-pointer flex-col items-start gap-2 rounded-lg border p-3 text-left text-sm transition-all hover:bg-accent select-none",
-                  selectedId === mail.id && "bg-muted",
-                  checkedIds.has(mail.id) && "border-primary/50 bg-accent/50",
-                )}
-              >
-                <div className="flex w-full flex-col gap-1">
-                  <div className="flex items-center">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        aria-label="Select message"
-                        checked={checkedIds.has(mail.id)}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          onToggleCheck(mail.id, e.shiftKey);
-                        }}
-                        className={cn(
-                          "opacity-0 transition-opacity group-hover:opacity-100",
-                          anyChecked && "opacity-100",
+            <ContextMenuTrigger
+              render={
+                // div, not button: the row holds a nested checkbox button
+                <div
+                  role="button"
+                  onClick={(e) => {
+                    if (isCheckboxClick(e.target)) return;
+                    if (e.metaKey || e.ctrlKey) onToggleCheck(mail.id, false);
+                    else if (e.shiftKey && anyChecked)
+                      onToggleCheck(mail.id, true);
+                    else onSelect(mail.id);
+                  }}
+                  className={cn(
+                    "group flex cursor-pointer flex-col items-start gap-2 rounded-lg border p-3 text-left text-sm transition-all hover:bg-accent select-none",
+                    selectedId === mail.id && "bg-muted",
+                    checkedIds.has(mail.id) && "border-primary/50 bg-accent/50",
+                  )}
+                >
+                  <div className="flex w-full flex-col gap-1">
+                    <div className="flex items-center">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          aria-label="Select message"
+                          checked={checkedIds.has(mail.id)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onToggleCheck(mail.id, e.shiftKey);
+                          }}
+                          className={cn(
+                            "opacity-0 transition-opacity group-hover:opacity-100",
+                            anyChecked && "opacity-100",
+                          )}
+                        />
+                        <span className="font-semibold">{mail.name}</span>
+                        {!mail.read && (
+                          <span className="flex size-2 rounded-full bg-blue-600" />
                         )}
-                      />
-                      <span className="font-semibold">{mail.name}</span>
-                      {!mail.read && (
-                        <span className="flex size-2 rounded-full bg-blue-600" />
-                      )}
+                      </div>
+                      <span
+                        className={cn(
+                          "ml-auto text-xs",
+                          selectedId === mail.id
+                            ? "text-foreground"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        {formatDate(mail.date)}
+                      </span>
                     </div>
-                    <span
-                      className={cn(
-                        "ml-auto text-xs",
-                        selectedId === mail.id
-                          ? "text-foreground"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {formatDate(mail.date)}
+                    <span className="line-clamp-1 wrap-anywhere text-xs font-medium">
+                      {mail.subject}
                     </span>
                   </div>
-                  <span className="line-clamp-1 wrap-anywhere text-xs font-medium">
-                    {mail.subject}
+                  <span className="line-clamp-2 wrap-anywhere text-xs text-muted-foreground">
+                    {mail.text.substring(0, 300)}
                   </span>
+                  {mail.labels.length ? (
+                    <div className="flex items-center gap-2">
+                      {mail.labels.map((label) => (
+                        <Badge key={label} variant={labelVariant(label)}>
+                          {label}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-                <span className="line-clamp-2 wrap-anywhere text-xs text-muted-foreground">
-                  {mail.text.substring(0, 300)}
-                </span>
-                {mail.labels.length ? (
-                  <div className="flex items-center gap-2">
-                    {mail.labels.map((label) => (
-                      <Badge key={label} variant={labelVariant(label)}>
-                        {label}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </ContextMenuTrigger>
+              }
+            />
             <ContextMenuContent>
-              <ContextMenuItem onSelect={() => act("archive", mail.id)}>
+              <ContextMenuItem onClick={() => act("archive", mail.id)}>
                 <Archive />
                 Archive
               </ContextMenuItem>
               <ContextMenuItem
                 variant="destructive"
-                onSelect={() =>
+                onClick={() =>
                   inTrash ? setDeleteTarget(mail) : act("trash", mail.id)
                 }
               >
@@ -194,7 +207,7 @@ export function MailList({
                 {inTrash ? "Delete permanently" : "Move to trash"}
               </ContextMenuItem>
               {junkAction && (
-                <ContextMenuItem onSelect={() => act(junkAction, mail.id)}>
+                <ContextMenuItem onClick={() => act(junkAction, mail.id)}>
                   {junkAction === "notJunk" ? <ShieldCheck /> : <ShieldAlert />}
                   {junkAction === "notJunk"
                     ? "Mark as not junk"
@@ -216,7 +229,7 @@ export function MailList({
                           disabled={
                             parseIcloudMailId(mail.id)?.folder === target
                           }
-                          onSelect={() => moveTo(mail.id, target)}
+                          onClick={() => moveTo(mail.id, target)}
                         >
                           {target === ICLOUD_FOLDER_NAMES.inbox
                             ? "Inbox"
@@ -255,12 +268,12 @@ export function MailList({
               ) : null}
               <ContextMenuSeparator />
               {mail.read ? (
-                <ContextMenuItem onSelect={() => act("unread", mail.id)}>
+                <ContextMenuItem onClick={() => act("unread", mail.id)}>
                   <MailX />
                   Mark as unread
                 </ContextMenuItem>
               ) : (
-                <ContextMenuItem onSelect={() => act("read", mail.id)}>
+                <ContextMenuItem onClick={() => act("read", mail.id)}>
                   <MailOpen />
                   Mark as read
                 </ContextMenuItem>

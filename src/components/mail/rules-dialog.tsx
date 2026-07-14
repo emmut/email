@@ -92,7 +92,8 @@ function RulesForm({
   const [conditions, setConditions] = useState<RuleCondition[]>([
     { field: "from", value: "" },
   ]);
-  const [target, setTarget] = useState("");
+  // null = nothing chosen yet (Base UI's Select shows its placeholder for null).
+  const [target, setTarget] = useState<string | null>(null);
 
   const targets: { id: string; name: string }[] = isGoogle
     ? (tags ?? [])
@@ -111,6 +112,7 @@ function RulesForm({
 
   const addRule = useMutation({
     mutationFn: async () => {
+      if (target === null) return;
       const trimmed = conditions.map((c) => ({
         field: c.field,
         value: c.value.trim(),
@@ -133,7 +135,7 @@ function RulesForm({
     },
     onSuccess: () => {
       setConditions([{ field: "from", value: "" }]);
-      setTarget("");
+      setTarget(null);
     },
   });
 
@@ -165,7 +167,7 @@ function RulesForm({
   });
 
   const valid =
-    target.length > 0 &&
+    target !== null &&
     conditions.every((c) => c.value.trim().length > 0) &&
     (!isGoogle || canMaterializeGmailFilter(conditions));
   const duplicateFields =
