@@ -85,6 +85,7 @@ export function MailList({
   onToggleCheck,
   inTrash,
   junkAction,
+  onRemoved,
 }: {
   items: Mail[];
   selectedId: string | null;
@@ -93,13 +94,14 @@ export function MailList({
   onToggleCheck: (id: string, range: boolean) => void;
   inTrash: boolean;
   junkAction: JunkAction;
+  onRemoved: (id: string) => void;
 }) {
   const anyChecked = checkedIds.size > 0;
   const { settings } = useSettings();
   // Permanent deletion (from within Trash) is the only destructive path that
   // asks first; moving to Trash is instant and recoverable.
   const [deleteTarget, setDeleteTarget] = useState<Mail | null>(null);
-  const { act, error: actError } = useMailActions();
+  const { act, error: actError } = useMailActions(onRemoved);
   const { toggle: toggleTag } = useTagActions();
   const { moveTo, error: moveError } = useMoveToFolder();
   const { activeAccount } = useAccount();

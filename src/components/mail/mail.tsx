@@ -78,6 +78,7 @@ import {
   toMail,
 } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
+import { nextSelectedId } from "@/lib/utils";
 import { useOfflineQueue } from "@/lib/offline";
 
 export function Mail() {
@@ -191,7 +192,8 @@ export function Mail() {
   const { error, refetch } = networkQuery;
 
   // Shared optimistic mail actions (provider-aware: Gmail or iCloud).
-  const { act, error: actError } = useMailActions();
+  // handleRemoved is hoisted — it needs selectMail, which needs act.
+  const { act, error: actError } = useMailActions(handleRemoved);
 
   const queryClient = useQueryClient();
   const emptyTrashMutation = useMutation({
@@ -229,6 +231,25 @@ export function Mail() {
     (m) => tab === "all" || !m.read || keptReadIds.has(m.id),
   );
   const selected = mails?.find((m) => m.id === selectedId) ?? null;
+
+  // Archiving/trashing the open mail advances the selection to the next mail
+  // so keyboard triage keeps flowing. Reads go through refs, not render-time
+  // values: a bulk action removes several mails before the next render, and
+  // each advance must see the one before it.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  function handleRemoved(id: string) {
+    if (selectedIdRef.current !== id) return;
+    const next = nextSelectedId(
+      itemsRef.current.map((m) => m.id),
+      id,
+    );
+    selectedIdRef.current = next;
+    if (next) selectMail(next);
+    else setSelectedId(null);
+  }
 
   // Checkbox/Cmd+click toggles one; Shift+click extends from the last toggle.
   const toggleCheck = (id: string, range: boolean) => {
@@ -537,6 +558,7 @@ export function Mail() {
                       onToggleCheck={toggleCheck}
                       inTrash={inTrash}
                       junkAction={junkAction}
+                      onRemoved={handleRemoved}
                     />
                   )}
                 </div>
@@ -548,7 +570,7 @@ export function Mail() {
                 mail={selected}
                 inTrash={inTrash}
                 junkAction={junkAction}
-                onDismiss={() => setSelectedId(null)}
+                onRemoved={handleRemoved}
               />
             </ResizablePanel>
           </ResizablePanelGroup>
