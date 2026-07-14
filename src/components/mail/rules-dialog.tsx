@@ -332,7 +332,13 @@ function RulesForm({
           <span className="text-muted-foreground ml-auto shrink-0 text-sm">
             {isGoogle ? "apply tag" : "move to"}
           </span>
-          <Select value={target} onValueChange={setTarget}>
+          <Select
+            value={target}
+            onValueChange={setTarget}
+            // Base UI renders the raw value in SelectValue unless it can look
+            // the label up here.
+            items={targets.map((t) => ({ value: t.id, label: t.name }))}
+          >
             <SelectTrigger
               className="max-w-44"
               aria-label={isGoogle ? "Tag" : "Folder"}
