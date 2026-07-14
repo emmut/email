@@ -233,6 +233,8 @@ pub fn run() {
             account::add_icloud_account,
             account::remove_account,
             account::set_default_account,
+            account::settings_get,
+            account::settings_set,
             account::update_account_display_name,
             account::get_google_access_token,
             account::icloud_search_messages,

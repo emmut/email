@@ -35,7 +35,7 @@ import type { Mail } from "@/components/mail/data";
 import { Kbd } from "@/components/ui/kbd";
 import { ComposeDialog, type ComposeDraft } from "@/components/mail/compose";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
-import { KEYS } from "@/lib/shortcuts";
+import { useKeys, useSettings } from "@/lib/settings";
 import { noDialogOpen, useMenuEvents } from "@/hooks/use-menu";
 import { useMailActions, type JunkAction } from "@/hooks/use-mail-actions";
 import { mailBodyQuery, profileQuery, type MailBody } from "@/lib/gmail";
@@ -149,6 +149,8 @@ export function MailDisplay({
   junkAction: JunkAction;
   onDismiss: () => void;
 }) {
+  const keys = useKeys();
+  const { settings } = useSettings();
   const [draft, setDraft] = useState<ComposeDraft | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -190,20 +192,22 @@ export function MailDisplay({
   const { act, isPending, error: actError } = useMailActions(() => onDismiss());
 
   // Trash is instant (recoverable for 30 days); deleting from within Trash
-  // is forever, so that one asks first.
+  // is forever, so that one asks first — unless confirmation is turned off
+  // in settings.
   const trashSelected = () => {
     if (!mail) return;
-    if (inTrash) setConfirmDelete(true);
-    else act("trash", mail.id);
+    if (!inTrash) act("trash", mail.id);
+    else if (settings.confirmPermanentDelete) setConfirmDelete(true);
+    else act("delete", mail.id);
   };
 
   useKeyboardShortcuts({
-    [KEYS.reply]: () => mail && openReply(false),
-    [KEYS.replyAll]: () => mail && openReply(true),
-    [KEYS.forward]: () => mail && openForward(),
-    [KEYS.archive]: () => mail && act("archive", mail.id),
-    [KEYS.trash]: () => trashSelected(),
-    [KEYS.junk]: () => mail && junkAction && act(junkAction, mail.id),
+    [keys.reply]: () => mail && openReply(false),
+    [keys.replyAll]: () => mail && openReply(true),
+    [keys.forward]: () => mail && openForward(),
+    [keys.archive]: () => mail && act("archive", mail.id),
+    [keys.trash]: () => trashSelected(),
+    [keys.junk]: () => mail && junkAction && act(junkAction, mail.id),
   });
 
   useMenuEvents({
@@ -238,7 +242,7 @@ export function MailDisplay({
             }
           />
           <TooltipContent>
-            Archive <Kbd>{KEYS.archive}</Kbd>
+            Archive <Kbd>{keys.archive}</Kbd>
           </TooltipContent>
         </Tooltip>
         <Tooltip>
@@ -256,7 +260,7 @@ export function MailDisplay({
           />
           <TooltipContent>
             {inTrash ? "Delete permanently" : "Move to trash"}{" "}
-            <Kbd>{KEYS.trash}</Kbd>
+            <Kbd>{keys.trash}</Kbd>
           </TooltipContent>
         </Tooltip>
         {junkAction && (
@@ -279,7 +283,7 @@ export function MailDisplay({
             />
             <TooltipContent>
               {junkAction === "notJunk" ? "Mark as not junk" : "Mark as junk"}{" "}
-              <Kbd>{KEYS.junk}</Kbd>
+              <Kbd>{keys.junk}</Kbd>
             </TooltipContent>
           </Tooltip>
         )}
@@ -303,11 +307,11 @@ export function MailDisplay({
           <TooltipContent>
             {mail.read ? (
               <>
-                Mark as unread <Kbd>{KEYS.markUnread}</Kbd>
+                Mark as unread <Kbd>{keys.markUnread}</Kbd>
               </>
             ) : (
               <>
-                Mark as read <Kbd>{KEYS.markRead}</Kbd>
+                Mark as read <Kbd>{keys.markRead}</Kbd>
               </>
             )}
           </TooltipContent>
@@ -343,7 +347,7 @@ export function MailDisplay({
               }
             />
             <TooltipContent>
-              Reply <Kbd>{KEYS.reply}</Kbd>
+              Reply <Kbd>{keys.reply}</Kbd>
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -360,7 +364,7 @@ export function MailDisplay({
               }
             />
             <TooltipContent>
-              Reply all <Kbd>{KEYS.replyAll}</Kbd>
+              Reply all <Kbd>{keys.replyAll}</Kbd>
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -377,7 +381,7 @@ export function MailDisplay({
               }
             />
             <TooltipContent>
-              Forward <Kbd>{KEYS.forward}</Kbd>
+              Forward <Kbd>{keys.forward}</Kbd>
             </TooltipContent>
           </Tooltip>
         </div>

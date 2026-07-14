@@ -51,7 +51,7 @@ import type { Mail as MailItem } from "@/components/mail/data";
 import { ShortcutsHelp } from "@/components/mail/shortcuts-help";
 import { CommandPalette } from "@/components/mail/command-palette";
 import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
-import { KEYS } from "@/lib/shortcuts";
+import { syncIntervalMs, useKeys, useSettings } from "@/lib/settings";
 import { noDialogOpen, useMenuEvents } from "@/hooks/use-menu";
 import { folders } from "@/components/mail/data";
 import {
@@ -81,6 +81,7 @@ import { useAccount } from "@/context/AccountContext";
 import { useOfflineQueue } from "@/lib/offline";
 
 export function Mail() {
+  const keys = useKeys();
   const [activeFolder, setActiveFolder] = useState("inbox");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<"all" | "unread">("all");
@@ -110,7 +111,9 @@ export function Mail() {
         ? "notJunk"
         : "junk";
 
-  useGmailSync(!isIcloud);
+  const { settings } = useSettings();
+  const syncMs = syncIntervalMs(settings);
+  useGmailSync(!isIcloud && syncMs !== false, syncMs || undefined);
   useOfflineQueue();
 
   useEffect(() => {
@@ -132,6 +135,7 @@ export function Mail() {
   const icloudQuery = useQuery({
     ...icloudList,
     enabled: isIcloud,
+    refetchInterval: syncMs,
     select: (msgs) => msgs.map(toMail),
   });
   const icloudLocal = useQuery({
@@ -275,15 +279,15 @@ export function Mail() {
   };
 
   useKeyboardShortcuts({
-    [KEYS.compose]: () => setComposeDraft({}),
-    [KEYS.nextMessage]: () => moveSelection(1),
-    [KEYS.prevMessage]: () => moveSelection(-1),
-    [KEYS.search]: () => searchRef.current?.focus(),
-    [KEYS.markUnread]: () => {
+    [keys.compose]: () => setComposeDraft({}),
+    [keys.nextMessage]: () => moveSelection(1),
+    [keys.prevMessage]: () => moveSelection(-1),
+    [keys.search]: () => searchRef.current?.focus(),
+    [keys.markUnread]: () => {
       if (checkedIds.size) actChecked("unread");
       else if (selected?.read) act("unread", selected.id);
     },
-    [KEYS.markRead]: () => {
+    [keys.markRead]: () => {
       if (checkedIds.size) actChecked("read");
       else if (selected && !selected.read) act("read", selected.id);
     },
@@ -291,7 +295,7 @@ export function Mail() {
       if (checkedIds.size) setCheckedIds(new Set());
       else setSelectedId(null);
     },
-    [KEYS.help]: () => setHelpOpen(true),
+    [keys.help]: () => setHelpOpen(true),
   });
 
   // Native menu commands (File/Go/Message/Help). Reply and Reply All are
@@ -341,7 +345,7 @@ export function Mail() {
             >
               <SquarePen className="size-4" />
               Compose
-              <Kbd>{KEYS.compose}</Kbd>
+              <Kbd>{keys.compose}</Kbd>
             </Button>
             {inTrash && (
               <Button
@@ -412,11 +416,12 @@ export function Mail() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() =>
-                                  inTrash
-                                    ? setConfirmDeleteChecked(true)
-                                    : actChecked("trash")
-                                }
+                                onClick={() => {
+                                  if (!inTrash) actChecked("trash");
+                                  else if (settings.confirmPermanentDelete)
+                                    setConfirmDeleteChecked(true);
+                                  else actChecked("delete");
+                                }}
                               >
                                 <Trash2 className="size-4" />
                               </Button>
@@ -463,7 +468,7 @@ export function Mail() {
                             }
                           />
                           <TooltipContent>
-                            Mark as read <Kbd>{KEYS.markRead}</Kbd>
+                            Mark as read <Kbd>{keys.markRead}</Kbd>
                           </TooltipContent>
                         </Tooltip>
                         <Tooltip>
@@ -479,7 +484,7 @@ export function Mail() {
                             }
                           />
                           <TooltipContent>
-                            Mark as unread <Kbd>{KEYS.markUnread}</Kbd>
+                            Mark as unread <Kbd>{keys.markUnread}</Kbd>
                           </TooltipContent>
                         </Tooltip>
                         <Tooltip>

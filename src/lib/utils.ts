@@ -12,3 +12,15 @@ export const isMac = navigator.platform.startsWith("Mac")
 export function compareNames(a: string, b: string): number {
   return a.localeCompare(b, navigator.language, { sensitivity: "base" })
 }
+
+// "emil.jansson@x" → "EJ"
+export function initialsFromEmail(email: string) {
+  return email
+    .split("@")[0]
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase()
+}

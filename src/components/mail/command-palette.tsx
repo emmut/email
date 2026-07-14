@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useNavigate } from "@tanstack/react-router";
 
 import { useMenuEvents } from "@/hooks/use-menu";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -13,9 +14,11 @@ import {
   RefreshCw,
   Search,
   Send,
+  Settings,
   ShieldAlert,
   ShieldCheck,
   SquarePen,
+  Star,
   Tag as TagIcon,
   Trash2,
   UserRound,
@@ -36,7 +39,7 @@ import {
 import { folders, type Mail } from "@/components/mail/data";
 import type { JunkAction, MailAction } from "@/hooks/use-mail-actions";
 import { tagFolderId, tagsQuery } from "@/lib/gmail";
-import { KEYS } from "@/lib/shortcuts";
+import { useKeys } from "@/lib/settings";
 import { useAccount } from "@/context/AccountContext";
 
 const FOLDER_ICONS: Record<string, LucideIcon> = {
@@ -74,8 +77,15 @@ export function CommandPalette({
   onEmptyTrash: () => void;
 }) {
   const queryClient = useQueryClient();
-  const { accounts, activeAccount, activeAccountId, switchAccount } =
-    useAccount();
+  const keys = useKeys();
+  const navigate = useNavigate();
+  const {
+    accounts,
+    activeAccount,
+    activeAccountId,
+    switchAccount,
+    setDefaultAccount,
+  } = useAccount();
   const isIcloud = activeAccount?.kind === "icloud";
   const { data: tags } = useQuery({ ...tagsQuery, enabled: open && !isIcloud });
 
@@ -127,12 +137,12 @@ export function CommandPalette({
           <CommandItem onSelect={run(onCompose)}>
             <SquarePen />
             Compose
-            <CommandShortcut>{KEYS.compose}</CommandShortcut>
+            <CommandShortcut>{keys.compose}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={run(onFocusSearch)}>
             <Search />
             Search mail
-            <CommandShortcut>{KEYS.search}</CommandShortcut>
+            <CommandShortcut>{keys.search}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={run(refresh)}>
             <RefreshCw />
@@ -145,8 +155,24 @@ export function CommandPalette({
           <CommandItem onSelect={run(onShowShortcuts)}>
             <Keyboard />
             Keyboard shortcuts
-            <CommandShortcut>{KEYS.help}</CommandShortcut>
+            <CommandShortcut>{keys.help}</CommandShortcut>
           </CommandItem>
+          <CommandItem
+            value="open settings"
+            onSelect={run(() => navigate({ to: "/settings" }))}
+          >
+            <Settings />
+            Open settings
+          </CommandItem>
+          {activeAccount && !activeAccount.is_default && (
+            <CommandItem
+              value="open this account at launch make default"
+              onSelect={run(() => setDefaultAccount(activeAccount.id))}
+            >
+              <Star />
+              Open this account at launch
+            </CommandItem>
+          )}
         </CommandGroup>
         {selected && (
           <>
@@ -155,12 +181,12 @@ export function CommandPalette({
               <CommandItem onSelect={run(() => onAct("archive", selected.id))}>
                 <Archive />
                 Archive
-                <CommandShortcut>{KEYS.archive}</CommandShortcut>
+                <CommandShortcut>{keys.archive}</CommandShortcut>
               </CommandItem>
               <CommandItem onSelect={run(() => onAct("trash", selected.id))}>
                 <Trash2 />
                 Move to trash
-                <CommandShortcut>{KEYS.trash}</CommandShortcut>
+                <CommandShortcut>{keys.trash}</CommandShortcut>
               </CommandItem>
               {junkAction && (
                 <CommandItem onSelect={run(() => onAct(junkAction, selected.id))}>
@@ -168,20 +194,20 @@ export function CommandPalette({
                   {junkAction === "notJunk"
                     ? "Mark as not junk"
                     : "Mark as junk"}
-                  <CommandShortcut>{KEYS.junk}</CommandShortcut>
+                  <CommandShortcut>{keys.junk}</CommandShortcut>
                 </CommandItem>
               )}
               {selected.read ? (
                 <CommandItem onSelect={run(() => onAct("unread", selected.id))}>
                   <MailIcon />
                   Mark as unread
-                  <CommandShortcut>{KEYS.markUnread}</CommandShortcut>
+                  <CommandShortcut>{keys.markUnread}</CommandShortcut>
                 </CommandItem>
               ) : (
                 <CommandItem onSelect={run(() => onAct("read", selected.id))}>
                   <MailOpen />
                   Mark as read
-                  <CommandShortcut>{KEYS.markRead}</CommandShortcut>
+                  <CommandShortcut>{keys.markRead}</CommandShortcut>
                 </CommandItem>
               )}
             </CommandGroup>
