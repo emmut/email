@@ -113,6 +113,11 @@ fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
         CREATE INDEX IF NOT EXISTS idx_accounts_kind ON accounts(kind);
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
     "#,
     )?;
     Ok(())
@@ -643,6 +648,39 @@ pub async fn set_default_account(
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// --- App settings (durable key/value in accounts.db — unlike cache_kv,
+// this survives cache schema bumps) ---
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn settings_get(
+    state: State<'_, AccountState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    let db = state.db.lock().await;
+    db.query_row(
+        "SELECT json FROM settings WHERE key = ?1",
+        params![&key],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn settings_set(
+    state: State<'_, AccountState>,
+    key: String,
+    json: String,
+) -> Result<(), String> {
+    let db = state.db.lock().await;
+    db.execute(
+        "INSERT OR REPLACE INTO settings (key, json, updated_at) VALUES (?1, ?2, ?3)",
+        params![&key, &json, &Utc::now().to_rfc3339()],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 

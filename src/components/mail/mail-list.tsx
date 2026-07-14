@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import type { Mail } from "@/components/mail/data";
 import { tagsQuery } from "@/lib/gmail";
@@ -94,6 +95,7 @@ export function MailList({
   junkAction: JunkAction;
 }) {
   const anyChecked = checkedIds.size > 0;
+  const { settings } = useSettings();
   // Permanent deletion (from within Trash) is the only destructive path that
   // asks first; moving to Trash is instant and recoverable.
   const [deleteTarget, setDeleteTarget] = useState<Mail | null>(null);
@@ -199,9 +201,12 @@ export function MailList({
               </ContextMenuItem>
               <ContextMenuItem
                 variant="destructive"
-                onClick={() =>
-                  inTrash ? setDeleteTarget(mail) : act("trash", mail.id)
-                }
+                onClick={() => {
+                  if (!inTrash) act("trash", mail.id);
+                  else if (settings.confirmPermanentDelete)
+                    setDeleteTarget(mail);
+                  else act("delete", mail.id);
+                }}
               >
                 <Trash2 />
                 {inTrash ? "Delete permanently" : "Move to trash"}

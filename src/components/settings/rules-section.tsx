@@ -13,12 +13,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -53,28 +47,19 @@ const FIELDS: RuleField[] = ["from", "to", "subject"];
 // Manage the active account's mail rules. Gmail rules become server-side
 // Gmail filters (they run even when the app is closed); iCloud rules are
 // applied by the app whenever new inbox mail is synced.
-export function RulesDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
+export function RulesSection() {
   const { activeAccount } = useAccount();
+  if (!activeAccount) return null;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      {open && activeAccount && (
-        <RulesForm
-          key={activeAccount.id}
-          accountId={activeAccount.id}
-          isGoogle={activeAccount.kind === "google"}
-        />
-      )}
-    </Dialog>
+    <RulesEditor
+      key={activeAccount.id}
+      accountId={activeAccount.id}
+      isGoogle={activeAccount.kind === "google"}
+    />
   );
 }
 
-function RulesForm({
+function RulesEditor({
   accountId,
   isGoogle,
 }: {
@@ -176,11 +161,7 @@ function RulesForm({
   const TargetIcon = isGoogle ? TagIcon : Folder;
 
   return (
-    <DialogContent className="sm:max-w-lg">
-      <DialogHeader>
-        <DialogTitle>Mail rules</DialogTitle>
-      </DialogHeader>
-
+    <div className="flex flex-col gap-4">
       {(rules ?? []).length === 0 ? (
         <Empty className="border border-dashed py-8">
           <EmptyHeader>
@@ -344,7 +325,9 @@ function RulesForm({
               aria-label={isGoogle ? "Tag" : "Folder"}
             >
               <TargetIcon className="text-muted-foreground size-3.5" />
-              <SelectValue placeholder={isGoogle ? "Choose tag…" : "Choose folder…"} />
+              <SelectValue
+                placeholder={isGoogle ? "Choose tag…" : "Choose folder…"}
+              />
             </SelectTrigger>
             <SelectContent>
               {targets.map((t) => (
@@ -378,11 +361,15 @@ function RulesForm({
               ? "Runs on Google's servers for new incoming mail."
               : "Applied to new inbox mail when the app syncs."}
           </p>
-          <Button type="submit" size="sm" disabled={!valid || addRule.isPending}>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!valid || addRule.isPending}
+          >
             {addRule.isPending ? "Adding…" : "Add rule"}
           </Button>
         </div>
       </form>
-    </DialogContent>
+    </div>
   );
 }

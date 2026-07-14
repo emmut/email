@@ -1,11 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { ShortcutsHelp } from "@/components/mail/shortcuts-help";
 
+// useKeys reads settings through react-query.
+function renderHelp(open: boolean) {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ShortcutsHelp open={open} onOpenChange={vi.fn()} />
+    </QueryClientProvider>,
+  );
+}
+
 describe("ShortcutsHelp", () => {
   it("lists every shortcut when open", () => {
-    render(<ShortcutsHelp open onOpenChange={vi.fn()} />);
+    renderHelp(true);
     for (const label of [
       "Compose",
       "Reply",
@@ -23,7 +33,7 @@ describe("ShortcutsHelp", () => {
   });
 
   it("renders nothing while closed", () => {
-    render(<ShortcutsHelp open={false} onOpenChange={vi.fn()} />);
+    renderHelp(false);
     expect(screen.queryByText("Keyboard shortcuts")).not.toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Archive,
   ArchiveX,
@@ -10,11 +11,8 @@ import {
   Plus,
   Send,
   Settings,
-  SlidersHorizontal,
-  SquarePen,
   Tag as TagIcon,
   Trash2,
-  UserPlus,
   type LucideIcon,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -30,6 +28,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -48,6 +47,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -64,10 +64,8 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { folders } from "@/components/mail/data";
-import { RulesDialog } from "@/components/mail/rules-dialog";
-import { SignatureDialog } from "@/components/mail/signature-dialog";
 import { useAccount } from "@/context/AccountContext";
-import { cn, isMac } from "@/lib/utils";
+import { cn, initialsFromEmail, isMac } from "@/lib/utils";
 import {
   avatarQuery,
   clearGmailCache,
@@ -100,18 +98,6 @@ const ICONS: Record<string, LucideIcon> = {
   archive: Archive,
 };
 
-// "emil.jansson@x" → "EJ"
-function initialsFromEmail(email: string) {
-  return email
-    .split("@")[0]
-    .split(/[._-]+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
-
 export function MailSidebar({
   activeFolder,
   onSelectFolder,
@@ -125,8 +111,6 @@ export function MailSidebar({
     activeAccount,
     activeAccountId,
     switchAccount,
-    addGoogleAccount,
-    addICloudAccount,
     removeAccount,
     isLoading,
   } = useAccount();
@@ -166,14 +150,7 @@ export function MailSidebar({
   const online = useOnline();
   const { data: pendingOps } = useQuery(pendingOpsQuery);
   const pendingCount = pendingOps?.length ?? 0;
-  const [addAccountOpen, setAddAccountOpen] = useState(false);
-  const [signatureOpen, setSignatureOpen] = useState(false);
-  const [rulesOpen, setRulesOpen] = useState(false);
-  const [addAccountType, setAddAccountType] = useState<"google" | "icloud">(
-    "google",
-  );
-  const [icloudEmail, setIcloudEmail] = useState("");
-  const [icloudPassword, setIcloudPassword] = useState("");
+  const navigate = useNavigate();
 
   const createTagMutation = useMutation({
     mutationFn: createTag,
@@ -315,44 +292,25 @@ export function MailSidebar({
                         </span>
                         <span className="truncate">{acc.email}</span>
                         {acc.is_default && (
-                          <span className="ml-auto text-xs text-green-600">
-                            ●
-                          </span>
+                          <Badge
+                            variant="outline"
+                            className="ml-auto shrink-0 font-normal"
+                            title="Opens at launch"
+                          >
+                            Default
+                          </Badge>
                         )}
                       </span>
                     </DropdownMenuItem>
                   ))}
                 </div>
-                <DropdownMenuItem
-                  onClick={() => {
-                    setAddAccountType("google");
-                    setAddAccountOpen(true);
-                  }}
-                >
-                  <UserPlus className="size-4" />
-                  Add Google account
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    setAddAccountType("icloud");
-                    setAddAccountOpen(true);
-                  }}
-                >
+                <DropdownMenuItem onClick={() => navigate({ to: "/settings" })}>
                   <Settings className="size-4" />
-                  Add iCloud account
+                  Settings…
+                  <DropdownMenuShortcut>
+                    {isMac ? "⌘," : "Ctrl+,"}
+                  </DropdownMenuShortcut>
                 </DropdownMenuItem>
-                {activeAccount && (
-                  <DropdownMenuItem onClick={() => setSignatureOpen(true)}>
-                    <SquarePen className="size-4" />
-                    Edit signature
-                  </DropdownMenuItem>
-                )}
-                {activeAccount && (
-                  <DropdownMenuItem onClick={() => setRulesOpen(true)}>
-                    <SlidersHorizontal className="size-4" />
-                    Mail rules
-                  </DropdownMenuItem>
-                )}
                 <DropdownMenuItem
                   disabled={signOutMutation.isPending}
                   onClick={() => signOutMutation.mutate()}
@@ -612,88 +570,6 @@ export function MailSidebar({
               </Button>
             </DialogFooter>
           </form>
-        </DialogContent>
-      </Dialog>
-      <SignatureDialog open={signatureOpen} onOpenChange={setSignatureOpen} />
-      <RulesDialog open={rulesOpen} onOpenChange={setRulesOpen} />
-      <Dialog open={addAccountOpen} onOpenChange={setAddAccountOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>
-              Add {addAccountType === "google" ? "Google" : "iCloud"} account
-            </DialogTitle>
-          </DialogHeader>
-          {addAccountType === "google" ? (
-            <div className="flex flex-col gap-4">
-              <p className="text-sm text-muted-foreground">
-                Opens browser for Google OAuth sign-in.
-              </p>
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setAddAccountOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={async () => {
-                    await addGoogleAccount();
-                    setAddAccountOpen(false);
-                  }}
-                >
-                  Sign in with Google
-                </Button>
-              </DialogFooter>
-            </div>
-          ) : (
-            <form
-              className="flex flex-col gap-4"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (icloudEmail && icloudPassword) {
-                  await addICloudAccount(icloudEmail, icloudPassword);
-                  setAddAccountOpen(false);
-                  setIcloudEmail("");
-                  setIcloudPassword("");
-                }
-              }}
-            >
-              <Input
-                autoFocus
-                placeholder="iCloud email"
-                value={icloudEmail}
-                onChange={(e) => setIcloudEmail(e.target.value)}
-                type="email"
-              />
-              <Input
-                placeholder="App-specific password"
-                value={icloudPassword}
-                onChange={(e) => setIcloudPassword(e.target.value)}
-                type="password"
-              />
-              <p className="text-xs text-muted-foreground">
-                Generate an app-specific password at{" "}
-                <a
-                  href="https://appleid.apple.com"
-                  target="_blank"
-                  rel="noopener"
-                  className="underline"
-                >
-                  appleid.apple.com
-                </a>
-              </p>
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={() => setAddAccountOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit">Add account</Button>
-              </DialogFooter>
-            </form>
-          )}
         </DialogContent>
       </Dialog>
     </Sidebar>
