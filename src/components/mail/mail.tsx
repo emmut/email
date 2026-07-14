@@ -80,6 +80,7 @@ import {
 import { useAccount } from "@/context/AccountContext";
 import { nextSelectedId } from "@/lib/utils";
 import { useOfflineQueue } from "@/lib/offline";
+import { useNewMailNotifications } from "@/lib/notifications";
 
 export function Mail() {
   const keys = useKeys();
@@ -187,6 +188,12 @@ export function Mail() {
         : undefined);
   }
   const mails = listData;
+  // Gmail announces new mail from its background history sync; iCloud has no
+  // delta channel, so notify by diffing the polled inbox listing.
+  useNewMailNotifications(
+    activeAccount?.id ?? "",
+    isIcloud && activeFolder === "inbox" ? mails : undefined,
+  );
   const isPending = networkQuery.isPending && listData === undefined;
   const isError = networkQuery.isError && listData === undefined;
   const { error, refetch } = networkQuery;

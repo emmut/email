@@ -21,6 +21,7 @@
     "@tanstack/react-router": "^1.170.16",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-http": "^2.5.9",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2",
     "@tiptap/extension-image": "3.27.3",
     "@tiptap/markdown": "3.27.3",

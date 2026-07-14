@@ -6,6 +6,7 @@ import { queryOptions, useQueryClient } from "@tanstack/react-query";
 import { getAccessToken } from "@/lib/auth";
 import { cacheDeletePrefix, cacheGet, cachePut } from "@/lib/cache";
 import { compareNames } from "@/lib/utils";
+import { isUnreadInboxArrival, notifyNewMail } from "@/lib/notifications";
 import type { Mail } from "@/components/mail/data";
 
 // Gmail is single-account today (legacy OAuth token); the local message store
@@ -1007,6 +1008,7 @@ async function applyGmailHistory(records: HistoryRecord[]) {
         messages: mails.map(mailToRow),
       });
       void prefetchBodies(mails);
+      void notifyNewMail(mails.filter(isUnreadInboxArrival));
     }
   }
   if (deleted.size) {
