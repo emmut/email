@@ -17,6 +17,13 @@ import { ShortcutsSection } from "@/components/settings/shortcuts-section";
 import { SignatureSection } from "@/components/settings/signature-section";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAccount } from "@/context/AccountContext";
 import { cn, isMac } from "@/lib/utils";
 
@@ -51,9 +58,12 @@ function SettingsPage() {
   const navigate = useNavigate();
   const { section: initial } = Route.useSearch();
   const [section, setSection] = useState<Section>(initial ?? "general");
-  const { activeAccount } = useAccount();
+  const { accounts, activeAccount, switchAccount } = useAccount();
 
-  // Rules and signature are per-account features; they edit the active one.
+  // Rules and signature are stored per account; the picker switches the
+  // active account (the mail APIs — Gmail filters, tags, iCloud folders —
+  // are bound to it, so a purely local selection would edit against the
+  // wrong account).
   const accountScoped = section === "rules" || section === "signature";
 
   return (
@@ -92,13 +102,45 @@ function SettingsPage() {
         </nav>
         <ScrollArea className="min-w-0 flex-1">
           <main className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
-            <div>
-              <h2 className="font-medium">
-                {NAV.find((n) => n.id === section)?.label}
-              </h2>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-4">
+                <h2 className="font-medium">
+                  {NAV.find((n) => n.id === section)?.label}
+                </h2>
+                {accountScoped && activeAccount && (
+                  <Select
+                    value={activeAccount.id}
+                    onValueChange={(id) => id !== null && switchAccount(id)}
+                    items={accounts.map((a) => ({
+                      value: a.id,
+                      label: `${a.kind === "google" ? "Gmail" : "iCloud"} — ${a.email}`,
+                    }))}
+                  >
+                    <SelectTrigger className="max-w-72" aria-label="Account">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.kind === "google" ? "Gmail" : "iCloud"} — {a.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
               {accountScoped && activeAccount && (
                 <p className="text-muted-foreground text-xs">
-                  For {activeAccount.email} — switch accounts to edit another.
+                  {section === "rules"
+                    ? "Each account keeps its own rules. Gmail rules run as filters on Google's servers; iCloud rules are applied by this app when new mail syncs."
+                    : "Each account keeps its own signature, stored on this computer."}{" "}
+                  Choosing an account here also makes it the active account in
+                  the mail view.
+                </p>
+              )}
+              {(section === "general" || section === "shortcuts") && (
+                <p className="text-muted-foreground text-xs">
+                  Applies to every account.
                 </p>
               )}
             </div>
