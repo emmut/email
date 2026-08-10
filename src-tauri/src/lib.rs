@@ -1,6 +1,8 @@
 mod account;
 mod db;
 mod oauth;
+#[cfg(target_os = "macos")]
+mod updater;
 mod utf7;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -150,6 +152,8 @@ pub fn run() {
                         &[
                             &PredefinedMenuItem::about(app, None, Some(about.clone()))?,
                             &PredefinedMenuItem::separator(app)?,
+                            &MenuItem::with_id(app, "check_for_updates", "Check for Updates…", true, None::<&str>)?,
+                            &PredefinedMenuItem::separator(app)?,
                             &PredefinedMenuItem::services(app, None)?,
                             &PredefinedMenuItem::separator(app)?,
                             &PredefinedMenuItem::hide(app, None)?,
@@ -177,6 +181,11 @@ pub fn run() {
             app.manage(account::ImapPool::default());
             let cache_db = db::CacheDb::new(app.handle())?;
             app.manage(cache_db);
+
+            // Start Sparkle (scheduled update checks); setup runs on the
+            // main thread, which Sparkle requires.
+            #[cfg(target_os = "macos")]
+            updater::init();
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -193,6 +202,11 @@ pub fn run() {
                 // Window/app commands handled natively (GTK renders no
                 // working predefined items for these).
                 "quit" => app.exit(0),
+                #[cfg(target_os = "macos")]
+                "check_for_updates" => {
+                    // Sparkle must be messaged on the main thread.
+                    let _ = app.run_on_main_thread(|| updater::check_for_updates());
+                }
                 "close_window" => {
                     if let Some(window) = focused() {
                         let _ = window.close();

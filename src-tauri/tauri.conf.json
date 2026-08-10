@@ -46,7 +46,8 @@
     "macOS": {
       "files": {
         "Resources/Assets.car": "icons/Assets.car"
-      }
+      },
+      "frameworks": ["frameworks/Sparkle.framework"]
     },
     "icon": [
       "icons/32x32.png",

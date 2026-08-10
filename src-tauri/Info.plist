@@ -5,5 +5,16 @@
 	<!-- Liquid Glass app icon compiled from icons/mail.icon into icons/Assets.car (macOS 26+); older macOS falls back to the bundled icns -->
 	<key>CFBundleIconName</key>
 	<string>mail</string>
+	<!-- Sparkle updater: the appcast is attached to every GitHub release by CI,
+	     and releases/latest/download always redirects to the newest one -->
+	<key>SUFeedURL</key>
+	<string>https://github.com/emmut/email/releases/latest/download/appcast.xml</string>
+	<!-- Public half of the EdDSA key pair; CI signs each dmg with the
+	     SPARKLE_ED_PRIVATE_KEY secret (see scripts/generate-sparkle-keys.py) -->
+	<key>SUPublicEDKey</key>
+	<string>h7+5Vpo8UOSy8ItcxVfxJqzB4/kvO8RAm8a+bVq4u6M=</string>
+	<!-- Skip Sparkle's "check automatically?" permission prompt on second launch -->
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
 </dict>
 </plist>

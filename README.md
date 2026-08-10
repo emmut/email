@@ -56,7 +56,40 @@ the quarantine flag:
 xattr -cr /Applications/Email.app
 ```
 
-Locally built apps don't need this (no quarantine attribute is set).
+Locally built apps don't need this (no quarantine attribute is set). This is a
+first-install-only step: subsequent versions arrive through the in-app updater
+(see *Updates* below), and Sparkle strips the quarantine flag when installing.
+
+## Updates (macOS)
+
+The macOS app updates itself with [Sparkle](https://sparkle-project.org):
+Sparkle checks for updates in the background (daily) and there's a manual
+*Email → Check for Updates…* menu item.
+
+How the pieces fit together:
+
+- `scripts/fetch-sparkle.sh` downloads `Sparkle.framework` into
+  `src-tauri/frameworks/` (gitignored); `src-tauri/build.rs` runs it
+  automatically when the framework is missing, links it, and sets the rpaths.
+  `tauri.conf.json` embeds the framework in the bundle.
+- `src-tauri/src/updater.rs` starts a `SPUStandardUpdaterController` at launch
+  (skipped when not running from an `.app` bundle, i.e. `tauri dev`).
+- `SUFeedURL` in `src-tauri/Info.plist` points at
+  `releases/latest/download/appcast.xml`; CI generates and attaches
+  `appcast.xml` to every `v*` release (`scripts/generate-appcast.sh`), signing
+  the dmg with EdDSA (`scripts/sign_update.py`). The EdDSA signature is what
+  lets Sparkle install updates without a Developer ID / notarization.
+
+One-time setup for a fork (or to rotate keys):
+
+```bash
+python3 scripts/generate-sparkle-keys.py
+```
+
+Put the printed public key in `src-tauri/Info.plist` under `SUPublicEDKey`,
+and store the private key as the `SPARKLE_ED_PRIVATE_KEY` GitHub Actions
+secret (never commit it). If the secret is missing, release builds still work
+— CI just skips the appcast and in-app updates won't see that release.
 
 ## Develop
 
