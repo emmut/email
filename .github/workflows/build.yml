@@ -176,38 +176,6 @@ jobs:
           shopt -s failglob
           gh release upload "$GITHUB_REF_NAME" $RELEASE_FILES --clobber
 
-      # Personal pacman repo: publish the package plus a repo database to the
-      # rolling `arch-repo` release, so machines with that repo in pacman.conf
-      # pick up new versions via plain `pacman -Syu` (see README, "Updates").
-      # The release is a prerelease so it can never become the repo's "latest"
-      # release — Sparkle's SUFeedURL depends on releases/latest pointing at
-      # the newest v* release.
-      - name: Publish to pacman repo
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.artifact == 'arch'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          shopt -s failglob
-          mkdir pacman-repo
-          cp packaging/arch/*.pkg.tar.zst pacman-repo/
-          cd pacman-repo
-          # Fresh db each release: only the newest version is installable via
-          # pacman; older packages stay attached to arch-repo for manual
-          # downgrades.
-          repo-add email.db.tar.gz *.pkg.tar.zst
-          # pacman fetches plain email.db / email.files; repo-add only leaves
-          # symlinks with those names, and symlinks don't survive the upload
-          cp --remove-destination email.db.tar.gz email.db
-          cp --remove-destination email.files.tar.gz email.files
-          if ! gh release view arch-repo &>/dev/null; then
-            gh release create arch-repo --prerelease --latest=false \
-              --title "Arch package repository" \
-              --notes "Rolling pacman repository, updated by CI on every release. See the README's Updates section for pacman.conf setup."
-          fi
-          gh release upload arch-repo *.pkg.tar.zst email.db email.files --clobber
-
       # Sparkle in-app updates: sign the dmg and attach an appcast to the
       # release. SUFeedURL in Info.plist points at
       # releases/latest/download/appcast.xml. Runs after the dmg upload so the

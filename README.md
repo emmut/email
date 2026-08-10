@@ -91,35 +91,6 @@ and store the private key as the `SPARKLE_ED_PRIVATE_KEY` GitHub Actions
 secret (never commit it). If the secret is missing, release builds still work
 — CI just skips the appcast and in-app updates won't see that release.
 
-## Updates (Arch Linux)
-
-CI publishes each release's pacman package, together with a repo database, to
-the rolling [`arch-repo`](https://github.com/emmut/email/releases/tag/arch-repo)
-GitHub release, making it a personal pacman repository: updates arrive with
-regular system updates (`pacman -Syu`), no AUR helper or manual download.
-
-One-time setup — add to `/etc/pacman.conf`:
-
-```ini
-[email]
-SigLevel = Optional TrustAll
-Server = https://github.com/emmut/email/releases/download/arch-repo
-```
-
-Then install with `sudo pacman -Sy email`.
-
-Notes:
-
-- Packages are unsigned (`SigLevel = Optional TrustAll`); acceptable for a
-  personal single-package repo fetched over HTTPS from this project's own
-  releases.
-- The database only lists the newest version; older `.pkg.tar.zst` files stay
-  attached to the `arch-repo` release for manual downgrades
-  (`pacman -U <file>`).
-- `arch-repo` is marked as a prerelease on purpose — GitHub's
-  `releases/latest` must keep pointing at the newest `v*` release because the
-  Sparkle appcast URL depends on it.
-
 ## Develop
 
 ```bash
