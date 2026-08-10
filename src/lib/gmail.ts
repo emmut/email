@@ -9,18 +9,18 @@ import { compareNames } from "@/lib/utils";
 import { isUnreadInboxArrival, notifyNewMail } from "@/lib/notifications";
 import type { Mail } from "@/components/mail/data";
 
-// Gmail is single-account today (legacy OAuth token); the local message store
-// is keyed under this id.
-const GMAIL_CACHE_ACCOUNT = "legacy";
+// Gmail cache account id: prefer active account when set, fall back to legacy
+const GMAIL_CACHE_LEGACY = "legacy";
+function gmailCacheAccount() {
+  return localStorage.getItem("activeAccountId") ?? GMAIL_CACHE_LEGACY;
+}
 
 export function clearGmailCache() {
   lastFolderSync.clear();
   prefetchedBodies.clear();
   return Promise.all([
     cacheDeletePrefix("gmail:"),
-    invoke("gmail_cache_clear", { account_id: GMAIL_CACHE_ACCOUNT }).catch(
-      () => {},
-    ),
+    invoke("gmail_cache_clear", { account_id: gmailCacheAccount() }).catch(() => {}),
   ]);
 }
 
@@ -425,7 +425,7 @@ async function rowsToMails(rows: GmailCachedMessage[]): Promise<Mail[]> {
 
 async function readGmailFolder(folder: string): Promise<Mail[]> {
   const rows = await invoke<GmailCachedMessage[]>("gmail_cache_list", {
-    account_id: GMAIL_CACHE_ACCOUNT,
+    account_id: gmailCacheAccount(),
     label_id: folderLabelId(folder),
     limit: 50,
   });
@@ -441,7 +441,7 @@ const lastFolderSync = new Map<string, number>();
 async function syncGmailFolder(folder: string): Promise<void> {
   const mails = await fetchMailsFromNetwork(folderParams(folder));
   await invoke("gmail_cache_replace_folder", {
-    account_id: GMAIL_CACHE_ACCOUNT,
+    account_id: gmailCacheAccount(),
     label_id: folderLabelId(folder),
     messages: mails.map(mailToRow),
   });
@@ -474,7 +474,7 @@ export function applyGmailLabelChange(
   remove: string[],
 ) {
   return invoke("gmail_cache_modify_labels", {
-    account_id: GMAIL_CACHE_ACCOUNT,
+    account_id: gmailCacheAccount(),
     message_id: id,
     add,
     remove,
@@ -492,7 +492,7 @@ export function applyGmailActionToCache(
 // Drop a permanently deleted message from the local store.
 export function removeGmailFromCache(id: string) {
   return invoke("gmail_cache_delete", {
-    account_id: GMAIL_CACHE_ACCOUNT,
+    account_id: gmailCacheAccount(),
     ids: [id],
   });
 }
@@ -1004,7 +1004,7 @@ async function applyGmailHistory(records: HistoryRecord[]) {
       .map((m) => toMail(m, names));
     if (mails.length) {
       await invoke("gmail_cache_upsert", {
-        account_id: GMAIL_CACHE_ACCOUNT,
+        account_id: gmailCacheAccount(),
         messages: mails.map(mailToRow),
       });
       void prefetchBodies(mails);
@@ -1013,7 +1013,7 @@ async function applyGmailHistory(records: HistoryRecord[]) {
   }
   if (deleted.size) {
     await invoke("gmail_cache_delete", {
-      account_id: GMAIL_CACHE_ACCOUNT,
+      account_id: gmailCacheAccount(),
       ids: [...deleted],
     });
   }

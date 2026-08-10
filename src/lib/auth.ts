@@ -45,6 +45,17 @@ export function resetGoogleAccountId() {
 }
 
 export async function getAccessToken(): Promise<string> {
+  // Prefer the currently active account (set by AccountContext) when present.
+  const active = localStorage.getItem("activeAccountId");
+  if (active) {
+    try {
+      return await invoke("get_google_access_token", { account_id: active });
+    } catch (err) {
+      // If the active account can't refresh, fall back to legacy resolution.
+      resetGoogleAccountId();
+    }
+  }
+
   const accountId = await findGoogleAccountId();
   if (accountId) {
     try {
