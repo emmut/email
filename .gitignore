@@ -23,6 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
+# Sparkle.framework downloaded by scripts/fetch-sparkle.sh (macOS builds)
+src-tauri/frameworks
+__pycache__
+
 # Secrets / local env (OAuth client id, GitHub PAT for shadcn registry, etc.)
 .env
 .env.*
