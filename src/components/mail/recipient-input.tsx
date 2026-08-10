@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import type { Contact } from "@/lib/gmail";
 
 // "Name <a@b>" list entry; quote the name if it would break the comma syntax.
-function formatRecipient(c: Contact): string {
+export function formatRecipient(c: Contact): string {
   if (!c.name || c.name === c.email) return c.email;
   const name = /[,<>"]/.test(c.name)
     ? `"${c.name.replace(/"/g, '\\"')}"`

@@ -23,6 +23,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useMention, type MentionConfig } from "@/components/ui/mention"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 
@@ -156,18 +157,23 @@ export function RichTextEditor({
   onChange,
   className,
   autoFocus,
+  mention,
 }: {
   initialHtml?: string
   onChange: (html: string, text: string, markdown: string) => void
   className?: string
   autoFocus?: boolean
+  mention?: MentionConfig // enables Gmail-style @ mentions when provided
 }) {
+  const { extension: mentionExtension, popup: mentionPopup } =
+    useMention(mention)
   const editor = useEditor({
     // inline so signature/quote images stay in their surrounding text flow
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Image.configure({ inline: true }),
       Markdown,
+      ...(mentionExtension ? [mentionExtension] : []),
     ],
     content: initialHtml ?? "",
     contentType: "html",
@@ -201,6 +207,7 @@ export function RichTextEditor({
     >
       <Toolbar editor={editor} />
       <EditorContent editor={editor} />
+      {mentionPopup}
     </div>
   )
 }
