@@ -181,6 +181,20 @@ export function RichTextEditor({
     onUpdate: ({ editor: e }) =>
       onChange(e.getHTML(), e.getText(), e.getMarkdown()),
     editorProps: {
+      // Mention nodes render as <a href="mailto:..."> atoms; without this the
+      // click navigates the whole webview away (WebKitGTK: "The URL can't be
+      // shown"). Links in the composer are inert, like Gmail.
+      handleDOMEvents: {
+        click: (_view, event) => {
+          const link =
+            event.target instanceof Element
+              ? event.target.closest("a[href]")
+              : null
+          if (!link) return false
+          event.preventDefault()
+          return true
+        },
+      },
       attributes: {
         class: cn(
           "min-h-44 max-h-80 overflow-y-auto px-2.5 py-1.5 text-sm break-words outline-none",
