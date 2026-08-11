@@ -128,6 +128,12 @@ function emailSrcDoc(html: string) {
   </style></head><body>${html}</body></html>`;
 }
 
+// Email HTML is isolated, but its links may explicitly target the top-level
+// browsing context. Permit only user-activated navigation so those links can
+// leave the frame without letting the message navigate on its own.
+export const emailIframeSandbox =
+  "allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation";
+
 function initials(name: string) {
   return name
     .split(/[\s.@]+/)
@@ -421,7 +427,7 @@ export function MailDisplay({
         ) : bodyQuery.data.html ? (
           <iframe
             title="Message body"
-            sandbox="allow-popups allow-popups-to-escape-sandbox"
+            sandbox={emailIframeSandbox}
             srcDoc={emailSrcDoc(bodyQuery.data.html)}
             className="h-full w-full border-0 bg-white"
           />
