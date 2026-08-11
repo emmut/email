@@ -6,6 +6,15 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main]
+  # Called by release.yml after it pushes the version tag. That tag is pushed
+  # with GITHUB_TOKEN, which never triggers the `push: tags` event (GitHub's
+  # anti-recursion rule), so the release run invokes this workflow directly.
+  workflow_call:
+    inputs:
+      version:
+        description: "Version being released; tag v<version> must exist"
+        required: true
+        type: string
 
 # One run per PR/branch; a new push cancels the in-flight run to save minutes.
 # main/tag pushes are never cancelled — they publish artifacts/releases.
@@ -16,8 +25,10 @@ concurrency:
 jobs:
   # The only job on PRs and main pushes: typecheck, tests, and a debug compile
   # (cargo test) cover both sides cheaply. The full bundle matrix below runs
-  # on tags only.
+  # only for releases. Redundant when called from release.yml — the release
+  # commit only bumps version numbers on an already-checked main.
   check:
+    if: ${{ !inputs.version }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
@@ -60,10 +71,12 @@ jobs:
   # jobs finishing at the same time raced: one created a duplicate release for the
   # tag and its assets were dropped when GitHub discarded the duplicate.
   create-release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.version != '' && format('v{0}', inputs.version) || github.ref_name }}
     steps:
       - name: Create GitHub release
         env:
@@ -76,12 +89,12 @@ jobs:
             xattr -cr /Applications/Email.app
             ```
         run: |
-          if ! gh release view "$GITHUB_REF_NAME" &>/dev/null; then
-            gh release create "$GITHUB_REF_NAME" --verify-tag --notes "$RELEASE_NOTES"
+          if ! gh release view "$RELEASE_TAG" &>/dev/null; then
+            gh release create "$RELEASE_TAG" --verify-tag --notes "$RELEASE_NOTES"
           fi
 
-  # Tag-only: create-release is skipped on non-tag refs, and `needs` skips
-  # this job whenever its dependency didn't succeed.
+  # Releases only (tag push or release.yml call): create-release is skipped
+  # otherwise, and `needs` skips this job whenever its dependency didn't run.
   build:
     needs: create-release
     permissions:
@@ -113,6 +126,8 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     container: ${{ matrix.container }}
+    env:
+      RELEASE_TAG: ${{ inputs.version != '' && format('v{0}', inputs.version) || github.ref_name }}
 
     steps:
       # before checkout so it runs in git mode instead of falling back to the REST API
@@ -120,7 +135,11 @@ jobs:
         if: matrix.container
         run: pacman -Syu --noconfirm git github-cli zstd webkit2gtk-4.1 openssl appmenu-gtk-module libayatana-appindicator librsvg xdotool file
 
+      # When called from release.yml, github.sha predates the version-bump
+      # commit — check out the tag instead.
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.version != '' && format('v{0}', inputs.version) || '' }}
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -151,8 +170,8 @@ jobs:
         shell: bash
         run: |
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          if [ "v${VERSION}" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::tauri.conf.json version ${VERSION} does not match tag ${GITHUB_REF_NAME}; use scripts/release.sh"
+          if [ "v${VERSION}" != "${RELEASE_TAG}" ]; then
+            echo "::error::tauri.conf.json version ${VERSION} does not match ${RELEASE_TAG}; use scripts/release.sh or the Release workflow"
             exit 1
           fi
 
@@ -191,7 +210,7 @@ jobs:
         # failglob makes an unmatched pattern an error instead of a silent skip
         run: |
           shopt -s failglob
-          gh release upload "$GITHUB_REF_NAME" $RELEASE_FILES --clobber
+          gh release upload "$RELEASE_TAG" $RELEASE_FILES --clobber
 
       # Personal pacman repo: publish the package plus a repo database to the
       # rolling `arch-repo` release, so machines with that repo in pacman.conf
@@ -242,7 +261,7 @@ jobs:
           fi
           shopt -s failglob
           dmgs=(src-tauri/target/release/bundle/dmg/*.dmg)
-          VERSION="${GITHUB_REF_NAME#v}"
-          URL="https://github.com/${GH_REPO}/releases/download/${GITHUB_REF_NAME}/$(basename "${dmgs[0]}")"
+          VERSION="${RELEASE_TAG#v}"
+          URL="https://github.com/${GH_REPO}/releases/download/${RELEASE_TAG}/$(basename "${dmgs[0]}")"
           scripts/generate-appcast.sh "${dmgs[0]}" "$VERSION" "$URL" appcast.xml
-          gh release upload "$GITHUB_REF_NAME" appcast.xml --clobber
+          gh release upload "$RELEASE_TAG" appcast.xml --clobber
