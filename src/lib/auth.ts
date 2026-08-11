@@ -1,10 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { queryOptions } from "@tanstack/react-query";
 import type { Account } from "@/types/account";
 
 // `pnpm dev` in a plain browser has no Tauri backend — pretend we're signed in
 // so the mock inbox stays reachable.
-const inTauri = "__TAURI_INTERNALS__" in window;
+const inTauri = isTauri();
 
 export const authStatusQuery = queryOptions({
   queryKey: ["auth", "status"],

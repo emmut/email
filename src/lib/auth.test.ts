@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
+  isTauri: () => false,
 }));
 
 const mockInvoke = vi.mocked(invoke);
