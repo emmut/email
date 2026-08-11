@@ -165,8 +165,10 @@ jobs:
         run: |
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           cp src-tauri/target/release/bundle/deb/*.deb packaging/arch/email.deb
-          # pacman pkgver forbids hyphens: 0.0.9-alpha -> 0.0.9_alpha
-          sed -i "s/^pkgver=.*/pkgver=${VERSION//-/_}/" packaging/arch/PKGBUILD
+          # pacman pkgver forbids hyphens. Strip rather than replace with _:
+          # vercmp orders 0.0.10alpha < 0.0.10 (prerelease before final) but
+          # 0.0.10_alpha > 0.0.10, which would block the final release.
+          sed -i "s/^pkgver=.*/pkgver=${VERSION//-/}/" packaging/arch/PKGBUILD
           useradd -m builder
           chown -R builder packaging/arch
           cd packaging/arch
