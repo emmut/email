@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { forwardDraft, replyDraft } from "@/components/mail/mail-display";
+import {
+  emailIframeSandbox,
+  forwardDraft,
+  replyDraft,
+} from "@/components/mail/mail-display";
 import { mailBody } from "@/test/fixtures";
 
 describe("replyDraft", () => {
@@ -71,5 +75,11 @@ describe("forwardDraft", () => {
 
   it("omits the Cc header when the original had none", () => {
     expect(forwardDraft(mailBody({ cc: "" })).bodyHtml).not.toContain("Cc:");
+  });
+});
+
+describe("email body iframe", () => {
+  it("allows a user-activated link to leave the email frame", () => {
+    expect(emailIframeSandbox).toContain("allow-top-navigation-by-user-activation");
   });
 });
