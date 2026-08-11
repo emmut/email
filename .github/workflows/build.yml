@@ -141,20 +141,18 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      # Single-source the app version from the release tag: bundle filenames,
-      # in-app version, Sparkle comparisons, and the Arch pkgver all read it
-      # from tauri.conf.json.
-      - name: Set version from tag
+      # tauri.conf.json is the version source of truth (scripts/release.sh
+      # bumps it and tags in one go). A mismatched tag would silently release
+      # the wrong version again — fail fast instead.
+      - name: Verify version matches tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
-          node -e "
-            const fs = require('fs');
-            const path = './src-tauri/tauri.conf.json';
-            const conf = JSON.parse(fs.readFileSync(path, 'utf8'));
-            conf.version = process.argv[1];
-            fs.writeFileSync(path, JSON.stringify(conf, null, 2) + '\n');
-          " "${GITHUB_REF_NAME#v}"
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "v${VERSION}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tauri.conf.json version ${VERSION} does not match tag ${GITHUB_REF_NAME}; use scripts/release.sh"
+            exit 1
+          fi
 
       - name: Build Tauri app
         run: pnpm tauri build ${{ matrix.build_args }}
