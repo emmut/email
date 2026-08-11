@@ -34,4 +34,7 @@ done
 git add package.json src-tauri/tauri.conf.json
 git commit -m "🔖 v$VERSION"
 git tag "v$VERSION"
-git push origin HEAD "v$VERSION"
+# branch first: if main rejects the push, stop before publishing the tag —
+# a combined push leaves an orphan tag when only the branch ref is refused
+git push origin HEAD
+git push origin "v$VERSION"
