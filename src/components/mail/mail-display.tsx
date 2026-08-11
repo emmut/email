@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Archive,
   Forward,
@@ -11,6 +11,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { isTauri } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import {
   AlertDialog,
@@ -116,23 +118,48 @@ export function forwardDraft(body: MailBody): ComposeDraft {
   };
 }
 
+const emailLinkMessageType = "email:open-external-link";
+
 // Wrap sanitized email HTML in a minimal document: light color-scheme (email
-// HTML assumes a white background), responsive images, links open outside.
-function emailSrcDoc(html: string) {
+// HTML assumes a white background), responsive images, and a small trusted
+// bridge which sends clicked links back to the app for OS-level opening.
+export function emailSrcDoc(html: string) {
   return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>
     :root { color-scheme: light }
     body { margin: 16px; font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.5; overflow-wrap: break-word }
     img { max-width: 100%; height: auto }
     pre { white-space: pre-wrap }
     blockquote { margin: 0 0 0 8px; padding-left: 8px; border-left: 2px solid #ccc; color: #555 }
-  </style></head><body>${html}</body></html>`;
+  </style><script>
+    document.addEventListener("click", function (event) {
+      var target = event.target;
+      var link = target instanceof Element ? target.closest("a[href]") : null;
+      if (!link) {
+        return;
+      }
+      event.preventDefault();
+      parent.postMessage({ type: "${emailLinkMessageType}", href: link.href }, "*");
+    });
+  </script></head><body>${html}</body></html>`;
 }
 
-// Email HTML is isolated, but its links may explicitly target the top-level
-// browsing context. Permit only user-activated navigation so those links can
-// leave the frame without letting the message navigate on its own.
-export const emailIframeSandbox =
-  "allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation";
+// The iframe gets a unique origin. Its only script is the bridge above; email
+// HTML is sanitized before it is passed here.
+export const emailIframeSandbox = "allow-scripts";
+
+export function externalEmailLink(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    return ["http:", "https:", "mailto:", "tel:"].includes(url.protocol)
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function initials(name: string) {
   return name
@@ -159,6 +186,36 @@ export function MailDisplay({
   const { settings } = useSettings();
   const [draft, setDraft] = useState<ComposeDraft | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const emailFrame = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent<unknown>) => {
+      if (event.source !== emailFrame.current?.contentWindow) return;
+      if (
+        typeof event.data !== "object" ||
+        event.data === null ||
+        !("type" in event.data) ||
+        event.data.type !== emailLinkMessageType ||
+        !("href" in event.data)
+      ) {
+        return;
+      }
+
+      const href = externalEmailLink(event.data.href);
+      if (!href) return;
+
+      if (isTauri()) {
+        void openUrl(href).catch((error: unknown) => {
+          console.error("Could not open email link", error);
+        });
+      } else {
+        window.open(href, "_blank", "noopener,noreferrer");
+      }
+    };
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
 
   const { activeAccount } = useAccount();
   const icloudRef = mail ? parseIcloudMailId(mail.id) : null;
@@ -427,6 +484,7 @@ export function MailDisplay({
         ) : bodyQuery.data.html ? (
           <iframe
             title="Message body"
+            ref={emailFrame}
             sandbox={emailIframeSandbox}
             srcDoc={emailSrcDoc(bodyQuery.data.html)}
             className="h-full w-full border-0 bg-white"

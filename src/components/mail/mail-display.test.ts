@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   emailIframeSandbox,
+  emailSrcDoc,
+  externalEmailLink,
   forwardDraft,
   replyDraft,
 } from "@/components/mail/mail-display";
@@ -79,7 +81,25 @@ describe("forwardDraft", () => {
 });
 
 describe("email body iframe", () => {
-  it("allows a user-activated link to leave the email frame", () => {
-    expect(emailIframeSandbox).toContain("allow-top-navigation-by-user-activation");
+  it("runs the trusted link-click bridge without giving the email its origin", () => {
+    expect(emailIframeSandbox).toContain("allow-scripts");
+    expect(emailIframeSandbox).not.toContain("allow-same-origin");
+    expect(emailSrcDoc('<a href="https://example.com">Example</a>')).toContain(
+      "parent.postMessage",
+    );
+  });
+
+  it("passes browser-safe email links to the external opener", () => {
+    expect(externalEmailLink("https://example.com/path")).toBe(
+      "https://example.com/path",
+    );
+    expect(externalEmailLink("mailto:hello@example.com")).toBe(
+      "mailto:hello@example.com",
+    );
+  });
+
+  it("rejects unsafe or malformed email links", () => {
+    expect(externalEmailLink("javascript:alert(1)")).toBeNull();
+    expect(externalEmailLink("not a url")).toBeNull();
   });
 });
