@@ -141,6 +141,21 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # Single-source the app version from the release tag: bundle filenames,
+      # in-app version, Sparkle comparisons, and the Arch pkgver all read it
+      # from tauri.conf.json.
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = './src-tauri/tauri.conf.json';
+            const conf = JSON.parse(fs.readFileSync(path, 'utf8'));
+            conf.version = process.argv[1];
+            fs.writeFileSync(path, JSON.stringify(conf, null, 2) + '\n');
+          " "${GITHUB_REF_NAME#v}"
+
       - name: Build Tauri app
         run: pnpm tauri build ${{ matrix.build_args }}
         env:
@@ -152,7 +167,8 @@ jobs:
         run: |
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           cp src-tauri/target/release/bundle/deb/*.deb packaging/arch/email.deb
-          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch/PKGBUILD
+          # pacman pkgver forbids hyphens: 0.0.9-alpha -> 0.0.9_alpha
+          sed -i "s/^pkgver=.*/pkgver=${VERSION//-/_}/" packaging/arch/PKGBUILD
           useradd -m builder
           chown -R builder packaging/arch
           cd packaging/arch
