@@ -505,7 +505,10 @@ pub async fn add_google_account(
         oauth::cache_token(&mut inner, &tokens);
     }
 
-    Ok(account)
+    Ok(Account {
+        is_default: is_first,
+        ..account
+    })
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -580,7 +583,10 @@ pub async fn add_icloud_account(
         ],
     ).map_err(|e| e.to_string())?;
 
-    Ok(account)
+    Ok(Account {
+        is_default: is_first,
+        ..account
+    })
 }
 
 #[tauri::command(rename_all = "snake_case")]

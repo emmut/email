@@ -22,6 +22,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { useAccount } from "@/context/AccountContext";
 import { initialsFromEmail } from "@/lib/utils";
 import type { Account } from "@/types/account";
@@ -41,6 +48,7 @@ export function AccountsSection() {
   const [icloudEmail, setIcloudEmail] = useState("");
   const [icloudPassword, setIcloudPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState<"google" | "icloud" | null>(null);
 
   const attempt = (fn: () => Promise<void>) => async () => {
     setError(null);
@@ -51,10 +59,28 @@ export function AccountsSection() {
     }
   };
 
+  const addAccount = async (
+    kind: "google" | "icloud",
+    fn: () => Promise<void>,
+  ) => {
+    setError(null);
+    setAdding(kind);
+    try {
+      await fn();
+      return true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return false;
+    } finally {
+      setAdding(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="divide-y rounded-lg border">
-        {accounts.map((acc) => (
+      {accounts.length > 0 ? (
+        <div className="divide-y rounded-lg border">
+          {accounts.map((acc) => (
           <div key={acc.id} className="flex items-center gap-3 p-3">
             <Avatar className="size-8 rounded-lg">
               {acc.avatar_url && <AvatarImage src={acc.avatar_url} alt="" />}
@@ -109,25 +135,57 @@ export function AccountsSection() {
               <Trash2 />
             </Button>
           </div>
-        ))}
-      </div>
-      <p className="text-muted-foreground text-xs">
-        The default account is the one the app opens with at launch.
-      </p>
+          ))}
+        </div>
+      ) : (
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <UserPlus />
+            </EmptyMedia>
+            <EmptyTitle>No accounts connected</EmptyTitle>
+            <EmptyDescription>
+              Add Gmail or iCloud Mail to start using your inbox.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
+      {accounts.length > 0 && (
+        <p className="text-muted-foreground text-xs">
+          The default account is the one the app opens with at launch.
+        </p>
+      )}
 
       <div className="flex gap-2">
-        <Button variant="outline" size="sm" onClick={attempt(addGoogleAccount)}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={adding !== null}
+          onClick={() => void addAccount("google", addGoogleAccount)}
+        >
           <UserPlus data-icon="inline-start" />
-          Add Google account
+          {adding === "google" ? "Waiting for browser…" : "Add Google account"}
         </Button>
-        <Button variant="outline" size="sm" onClick={() => setIcloudOpen(true)}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={adding !== null}
+          onClick={() => setIcloudOpen(true)}
+        >
           <UserPlus data-icon="inline-start" />
           Add iCloud account
         </Button>
       </div>
-      {error != null && <p className="text-destructive text-xs">{error}</p>}
+      {error != null && !icloudOpen && (
+        <p className="text-destructive text-xs" role="alert">
+          {error}
+        </p>
+      )}
 
-      <Dialog open={icloudOpen} onOpenChange={setIcloudOpen}>
+      <Dialog
+        open={icloudOpen}
+        onOpenChange={(open) => adding === null && setIcloudOpen(open)}
+      >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Add iCloud account</DialogTitle>
@@ -137,12 +195,14 @@ export function AccountsSection() {
             onSubmit={async (e) => {
               e.preventDefault();
               if (!icloudEmail || !icloudPassword) return;
-              await attempt(() =>
-                addICloudAccount(icloudEmail, icloudPassword),
-              )();
-              setIcloudOpen(false);
-              setIcloudEmail("");
-              setIcloudPassword("");
+              const added = await addAccount("icloud", () =>
+                addICloudAccount(icloudEmail.trim(), icloudPassword),
+              );
+              if (added) {
+                setIcloudOpen(false);
+                setIcloudEmail("");
+                setIcloudPassword("");
+              }
             }}
           >
             <Input
@@ -169,15 +229,28 @@ export function AccountsSection() {
                 appleid.apple.com
               </a>
             </p>
+            {error != null && (
+              <p className="text-destructive text-xs" role="alert">
+                {error}
+              </p>
+            )}
             <DialogFooter>
               <Button
                 variant="outline"
                 type="button"
+                disabled={adding !== null}
                 onClick={() => setIcloudOpen(false)}
               >
                 Cancel
               </Button>
-              <Button type="submit">Add account</Button>
+              <Button
+                type="submit"
+                disabled={
+                  adding !== null || !icloudEmail.trim() || !icloudPassword
+                }
+              >
+                {adding === "icloud" ? "Checking account…" : "Add account"}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
