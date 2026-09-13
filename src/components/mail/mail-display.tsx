@@ -44,6 +44,11 @@ import { mailBodyQuery, profileQuery, type MailBody } from "@/lib/gmail";
 import { icloudMessageBodyQuery, parseIcloudMailId } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
 import { errMessage } from "@/lib/utils";
+import {
+  emailBridgeMessage,
+  emailIframeSandbox,
+  emailSrcDoc,
+} from "@/components/mail/email-link-bridge";
 
 function splitAddresses(raw: string): string[] {
   return raw
@@ -119,57 +124,39 @@ export function forwardDraft(body: MailBody): ComposeDraft {
   };
 }
 
-const emailLinkMessageType = "email:open-external-link";
+type LinkDiagnostic =
+  | { status: "waiting" }
+  | { status: "blocked" }
+  | { status: "ready" }
+  | { status: "opened"; href: string; error?: string };
 
-// Trusted bridge injected into the email iframe. It runs in an opaque-origin
-// sandbox, so it can only reach out via postMessage. The release CSP in
-// src-tauri/tauri.conf.json allow-lists this exact inline script by cryptographic
-// hash; if you change a single byte here you MUST recompute that hash and update
-// the config, otherwise links silently stop opening in release builds.
-const emailLinkBridgeScript = `document.addEventListener("click", function (event) {
-  var target = event.target;
-  var link = target instanceof Element ? target.closest("a[href]") : null;
-  if (!link) {
-    return;
+function LinkDiagnosticStatus({
+  diagnostic,
+}: {
+  diagnostic: LinkDiagnostic;
+}) {
+  if (diagnostic.status === "waiting") {
+    return <>Link bridge: starting…</>;
   }
-  event.preventDefault();
-  parent.postMessage({ type: "email:open-external-link", href: link.href }, "*");
-});`;
-
-// sha256 of emailLinkBridgeScript, as written into the production CSP.
-// Keep tauri.conf.json > app > security > csp > script-src in sync.
-export const emailLinkBridgeScriptHash =
-  "sha256-vCjuz9Yu1FgdwvI8Y6k7H9u2L7BPRv9IS98zGydfEy4=";
-
-// Wrap sanitized email HTML in a minimal document: light color-scheme (email
-// HTML assumes a white background), responsive images, and a small trusted
-// bridge which sends clicked links back to the app for OS-level opening.
-export function emailSrcDoc(html: string) {
-  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>
-    :root { color-scheme: light }
-    body { margin: 16px; font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.5; overflow-wrap: break-word }
-    img { max-width: 100%; height: auto }
-    pre { white-space: pre-wrap }
-    blockquote { margin: 0 0 0 8px; padding-left: 8px; border-left: 2px solid #ccc; color: #555 }
-  </style><script>${emailLinkBridgeScript}</script></head><body>${html}</body></html>`;
-}
-
-// The iframe gets a unique origin. Its only script is the bridge above; email
-// HTML is sanitized before it is passed here.
-export const emailIframeSandbox = "allow-scripts";
-
-export function externalEmailLink(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
+  if (diagnostic.status === "blocked") {
+    return (
+      <span className="text-destructive">
+        Link bridge not running — inline script blocked. Report this issue to
+        the developer.
+      </span>
+    );
   }
-  try {
-    const url = new URL(value);
-    return ["http:", "https:", "mailto:", "tel:"].includes(url.protocol)
-      ? url.href
-      : null;
-  } catch {
-    return null;
+  if (diagnostic.status === "ready") {
+    return <>Link bridge ready</>;
   }
+  if (diagnostic.error) {
+    return (
+      <span className="text-destructive">
+        Open failed ({diagnostic.href}): {diagnostic.error}
+      </span>
+    );
+  }
+  return <>Opened {diagnostic.href}</>;
 }
 
 function initials(name: string) {
@@ -198,27 +185,60 @@ export function MailDisplay({
   const [draft, setDraft] = useState<ComposeDraft | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const emailFrame = useRef<HTMLIFrameElement>(null);
+  const [linkDiagnostic, setLinkDiagnostic] = useState<LinkDiagnostic>({
+    status: "waiting",
+  });
 
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
-      if (event.source !== emailFrame.current?.contentWindow) return;
-      if (
-        typeof event.data !== "object" ||
-        event.data === null ||
-        !("type" in event.data) ||
-        event.data.type !== emailLinkMessageType ||
-        !("href" in event.data)
-      ) {
+      const message = emailBridgeMessage(
+        event,
+        emailFrame.current?.contentWindow,
+      );
+      if (!message) return;
+
+      if (message.type === "ready") {
+        setLinkDiagnostic((diagnostic) => {
+          if (
+            diagnostic.status === "ready" ||
+            diagnostic.status === "opened"
+          ) {
+            return diagnostic;
+          }
+          return { status: "ready" };
+        });
         return;
       }
 
-      const href = externalEmailLink(event.data.href);
-      if (!href) return;
+      const { href } = message;
+
+      setLinkDiagnostic({ status: "opened", href });
 
       if (isTauri()) {
-        void openUrl(href).catch((error: unknown) => {
-          console.error("Could not open email link", error);
-        });
+        void openUrl(href)
+          .then(() =>
+            setLinkDiagnostic((diagnostic) => {
+              if (
+                diagnostic.status !== "opened" ||
+                diagnostic.href !== href
+              ) {
+                return diagnostic;
+              }
+              return { ...diagnostic, error: undefined };
+            }),
+          )
+          .catch((error: unknown) => {
+            console.error("Could not open email link", error);
+            setLinkDiagnostic((diagnostic) => {
+              if (
+                diagnostic.status !== "opened" ||
+                diagnostic.href !== href
+              ) {
+                return diagnostic;
+              }
+              return { ...diagnostic, error: errMessage(error) };
+            });
+          });
       } else {
         window.open(href, "_blank", "noopener,noreferrer");
       }
@@ -247,6 +267,22 @@ export function MailDisplay({
     enabled: isIcloud && !!activeAccount,
   });
   const bodyQuery = isIcloud ? icloudBody : gmailBody;
+
+  useEffect(() => {
+    if (!bodyQuery.data?.html) return;
+
+    setLinkDiagnostic({ status: "waiting" });
+    const timeout = window.setTimeout(() => {
+      setLinkDiagnostic((diagnostic) => {
+        if (diagnostic.status !== "waiting") {
+          return diagnostic;
+        }
+        return { status: "blocked" };
+      });
+    }, 4000);
+
+    return () => window.clearTimeout(timeout);
+  }, [bodyQuery.data?.html, mail?.id]);
 
   const openReply = (all: boolean) => {
     if (!bodyQuery.data) return;
@@ -481,7 +517,12 @@ export function MailDisplay({
         </div>
       </div>
       <Separator />
-      <div className="flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {bodyQuery.data?.html && (
+          <div className="text-muted-foreground px-4 py-1 text-[11px]">
+            <LinkDiagnosticStatus diagnostic={linkDiagnostic} />
+          </div>
+        )}
         {bodyQuery.isPending ? (
           <div className="flex flex-col gap-2 p-4">
             <Skeleton className="h-4 w-full" />
@@ -498,7 +539,7 @@ export function MailDisplay({
             ref={emailFrame}
             sandbox={emailIframeSandbox}
             srcDoc={emailSrcDoc(bodyQuery.data.html)}
-            className="h-full w-full border-0 bg-white"
+            className="min-h-0 w-full flex-1 border-0 bg-white"
           />
         ) : (
           <div className="h-full overflow-auto p-4 text-sm whitespace-pre-wrap">
