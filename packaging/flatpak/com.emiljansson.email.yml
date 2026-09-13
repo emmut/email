@@ -13,6 +13,11 @@ finish-args:
   - --device=dri
   # The Rust keyring backend stores OAuth and mail credentials in Secret Service.
   - --talk-name=org.freedesktop.secrets
+  # Opening links (https:, mailto:, tel:) in the default browser runs through
+  # xdg-desktop-portal's OpenURI portal inside the sandbox — tauri-plugin-opener
+  # spawns xdg-open, which can only reach the host through this portal. Without
+  # the talk-name the portal denies the call and clicks silently do nothing.
+  - --talk-name=org.freedesktop.portal.OpenURI
 
 modules:
   - name: email
