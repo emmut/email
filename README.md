@@ -120,6 +120,38 @@ Notes:
   `releases/latest` must keep pointing at the newest `v*` release because the
   Sparkle appcast URL depends on it.
 
+## Install on Linux with Flatpak
+
+Every GitHub release includes an `Email.flatpak` bundle. Download it from the
+release page and install it locally:
+
+```bash
+flatpak install --user ./Email.flatpak
+```
+
+The bundle is self-contained, but it is not an update repository. Install a
+new bundle from a later release to update the app; Flatpak preserves its data
+under `~/.var/app/com.emiljansson.email`.
+
+To build the Flatpak locally, first build the Tauri deb, then stage and wrap it:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm tauri build --bundles deb
+cp src-tauri/target/release/bundle/deb/*.deb packaging/flatpak/email.deb
+flatpak remote-add --user --if-not-exists flathub \
+  https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user flathub org.gnome.Platform//49 org.gnome.Sdk//49
+flatpak-builder --user --force-clean --repo=flatpak-repo flatpak-build \
+  packaging/flatpak/com.emiljansson.email.yml
+flatpak build-bundle flatpak-repo packaging/flatpak/Email.flatpak \
+  com.emiljansson.email
+```
+
+The manifest grants network access for mail and OAuth, graphics/display access,
+and access to Secret Service for credential storage. It does not grant access
+to host files or the home directory.
+
 ## Develop
 
 ```bash
