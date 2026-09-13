@@ -67,6 +67,52 @@ jobs:
       - name: Cargo tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+  # Exercise the complete Linux packaging path on PRs and main. Release runs
+  # do the same work in the bundle matrix below and publish the result.
+  flatpak:
+    if: ${{ !inputs.version }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux and Flatpak dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev flatpak flatpak-builder
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri deb
+        run: pnpm tauri build --bundles deb
+
+      - name: Build Flatpak bundle
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.gnome.Platform//49 org.gnome.Sdk//49
+          cp src-tauri/target/release/bundle/deb/*.deb packaging/flatpak/email.deb
+          flatpak-builder --user --force-clean --repo=flatpak-repo flatpak-build packaging/flatpak/com.emiljansson.email.yml
+          flatpak build-bundle flatpak-repo packaging/flatpak/Email.flatpak com.emiljansson.email
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: email-flatpak
+          path: packaging/flatpak/Email.flatpak
+          if-no-files-found: error
+
   # Create the release once, up front. When each matrix job created it on demand,
   # jobs finishing at the same time raced: one created a duplicate release for the
   # tag and its assets were dropped when GitHub discarded the duplicate.
@@ -112,10 +158,12 @@ jobs:
               src-tauri/target/release/bundle/deb/*.deb
               src-tauri/target/release/bundle/rpm/*.rpm
               src-tauri/target/release/bundle/appimage/*.AppImage
+              packaging/flatpak/*.flatpak
             release_files: |
               src-tauri/target/release/bundle/deb/*.deb
               src-tauri/target/release/bundle/rpm/*.rpm
               src-tauri/target/release/bundle/appimage/*.AppImage
+              packaging/flatpak/*.flatpak
           # native Arch build in a container; the deb gets repackaged by makepkg
           - platform: ubuntu-latest
             container: archlinux:base-devel
@@ -145,7 +193,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev flatpak flatpak-builder
 
       - uses: pnpm/action-setup@v6
 
@@ -180,6 +228,15 @@ jobs:
         env:
           GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+
+      - name: Build Flatpak bundle
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.gnome.Platform//49 org.gnome.Sdk//49
+          cp src-tauri/target/release/bundle/deb/*.deb packaging/flatpak/email.deb
+          flatpak-builder --user --force-clean --repo=flatpak-repo flatpak-build packaging/flatpak/com.emiljansson.email.yml
+          flatpak build-bundle flatpak-repo packaging/flatpak/Email.flatpak com.emiljansson.email
 
       - name: Build Arch package
         if: matrix.container

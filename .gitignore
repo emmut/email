@@ -32,3 +32,10 @@ __pycache__
 .env.*
 !.env.example
 coverage
+
+# Flatpak build inputs and output (the manifest and metadata are committed)
+packaging/flatpak/email.deb
+packaging/flatpak/*.flatpak
+.flatpak-builder/
+flatpak-build/
+flatpak-repo/

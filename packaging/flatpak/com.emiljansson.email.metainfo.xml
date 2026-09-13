@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.emiljansson.email</id>
+  <name>Email</name>
+  <summary>A focused desktop email client</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="com.emiljansson">
+    <name>Emil Jansson</name>
+  </developer>
+  <description>
+    <p>
+      Email is a personal desktop mail client for reading, writing, and
+      organizing Gmail and IMAP accounts without opening a browser.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.emiljansson.email.desktop</launchable>
+  <url type="homepage">https://github.com/emmut/email</url>
+  <url type="bugtracker">https://github.com/emmut/email/issues</url>
+  <content_rating type="oars-1.1" />
+</component>

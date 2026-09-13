@@ -1,0 +1,44 @@
+app-id: com.emiljansson.email
+runtime: org.gnome.Platform
+runtime-version: "49"
+sdk: org.gnome.Sdk
+command: email
+
+# Tauri 2 uses GTK 3 and webkit2gtk-4.1, both provided by the GNOME runtime.
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # The Rust keyring backend stores OAuth and mail credentials in Secret Service.
+  - --talk-name=org.freedesktop.secrets
+
+modules:
+  - name: email
+    buildsystem: simple
+    build-commands:
+      # Repackage the binary produced by the existing Tauri release build. This
+      # keeps Cargo and pnpm compilation in one place and makes the Flatpak use
+      # exactly the same binary as the deb/rpm/AppImage release artifacts.
+      - ar x email.deb
+      - mkdir extract
+      - tar -xf data.tar.* -C extract
+      - install -Dm755 extract/usr/bin/email /app/bin/email
+      - install -Dm644 com.emiljansson.email.png /app/share/icons/hicolor/256x256/apps/com.emiljansson.email.png
+      - install -Dm644 com.emiljansson.email.desktop /app/share/applications/com.emiljansson.email.desktop
+      - install -Dm644 com.emiljansson.email.metainfo.xml /app/share/metainfo/com.emiljansson.email.metainfo.xml
+      - install -Dm644 LICENSE.txt /app/share/licenses/com.emiljansson.email/LICENSE.txt
+    sources:
+      # CI and the local build instructions stage the generated deb here.
+      - type: file
+        path: email.deb
+      - type: file
+        path: com.emiljansson.email.desktop
+      - type: file
+        path: com.emiljansson.email.metainfo.xml
+      - type: file
+        path: ../../src-tauri/icons/128x128@2x.png
+        dest-filename: com.emiljansson.email.png
+      - type: file
+        path: ../../LICENSE.txt

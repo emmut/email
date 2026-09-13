@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Email
+Comment=Read, write, and organize your email
+Exec=email
+Icon=com.emiljansson.email
+Terminal=false
+Type=Application
+Categories=Network;Email;
+Keywords=Email;Mail;Gmail;IMAP;
+StartupNotify=true
+StartupWMClass=Email
+X-GNOME-UsesNotifications=true
