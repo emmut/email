@@ -744,6 +744,27 @@ export const contactsQuery = queryOptions({
 
 // --- mutations ---
 
+// Token/auth failures surface a generic 401/403 at the API layer too (not
+// only at the token endpoint).  Translate those into actionable messages
+// like deleteMessage's existing withScopeHint so the banner is never blank.
+function withModifyHint(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.startsWith("Google API 401")) {
+    return new Error(
+      "Gmail access was revoked or expired. Re-grant access under Settings → Accounts.",
+    );
+  }
+  if (
+    msg.startsWith("Google API 403") &&
+    /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient/i.test(msg)
+  ) {
+    return new Error(
+      "Google denied this action: the sign-in predates the needed permission. Re-sign in to grant it.",
+    );
+  }
+  return err instanceof Error ? err : new Error(msg);
+}
+
 function modifyMessage(
   id: string,
   labels: { addLabelIds?: string[]; removeLabelIds?: string[] },
@@ -751,7 +772,7 @@ function modifyMessage(
   return gmail<Message>(`/messages/${id}/modify`, {
     method: "POST",
     body: JSON.stringify(labels),
-  });
+  }).catch(withModifyHint);
 }
 
 export function archiveMessage(id: string) {
@@ -769,7 +790,9 @@ export function notJunkMessage(id: string) {
 }
 
 export function trashMessage(id: string) {
-  return gmail<Message>(`/messages/${id}/trash`, { method: "POST" });
+  return gmail<Message>(`/messages/${id}/trash`, { method: "POST" }).catch(
+    withModifyHint,
+  );
 }
 
 // Accounts authorized before the full-mail scope was adopted hold tokens that

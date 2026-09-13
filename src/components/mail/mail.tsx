@@ -78,7 +78,7 @@ import {
   toMail,
 } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
-import { nextSelectedId } from "@/lib/utils";
+import { errMessage, nextSelectedId } from "@/lib/utils";
 import { useOfflineQueue } from "@/lib/offline";
 import { useNewMailNotifications } from "@/lib/notifications";
 
@@ -414,7 +414,7 @@ export function Mail() {
                 {(actError || emptyTrashMutation.error) && (
                   <p className="text-destructive border-b px-4 py-2 text-xs">
                     Action failed:{" "}
-                    {(actError ?? emptyTrashMutation.error)?.message}
+                    {errMessage(actError ?? emptyTrashMutation.error)}
                   </p>
                 )}
                 {checkedIds.size > 0 && (

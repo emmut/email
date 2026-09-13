@@ -25,6 +25,16 @@ export function nextSelectedId(
   return ids[index + 1] ?? ids[index - 1] ?? null
 }
 
+// Normalize a thrown value to a non-empty, displayable string. Mutation or
+// query rejections can be anything — non-Error values, empty strings — and a
+// blank "Action failed:" tells the user nothing.
+export function errMessage(err: unknown): string {
+  if (err == null) return "Unknown error";
+  if (err instanceof Error) return err.message.trim() || "Unknown error";
+  const text = String(err).trim();
+  return text || "Unknown error";
+}
+
 // "emil.jansson@x" → "EJ"
 export function initialsFromEmail(email: string) {
   return email

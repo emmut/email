@@ -3,8 +3,16 @@ import { describe, expect, it } from "vitest";
 import { isNetworkError } from "@/lib/offline";
 
 describe("isNetworkError", () => {
-  it("treats HTTP responses from Google as non-network errors", () => {
-    expect(isNetworkError(new Error("Google API 500: boom"))).toBe(false);
+  it("treats rate limits and transient server errors from Google as retryable", () => {
+    expect(isNetworkError(new Error("Google API 429: too many requests"))).toBe(
+      true,
+    );
+    expect(isNetworkError(new Error("Google API 503: unavailable"))).toBe(true);
+  });
+
+  it("treats other HTTP responses from Google as application errors", () => {
+    expect(isNetworkError(new Error("Google API 400: bad request"))).toBe(false);
+    expect(isNetworkError(new Error("Google API 401: unauthorized"))).toBe(false);
     expect(isNetworkError(new Error("Google API 403: forbidden"))).toBe(false);
   });
 

@@ -71,6 +71,29 @@ describe("getAccessToken", () => {
         throw new Error("token endpoint returned 400: invalid_grant");
       throw new Error(`unexpected ${cmd}`);
     });
-    await expect(getAccessToken()).rejects.toThrow("invalid_grant");
+    await expect(getAccessToken()).rejects.toThrow("Gmail access expired");
+  });
+
+  it("turns a revoked refresh token into an actionable re-grant error", async () => {
+    mockInvoke.mockImplementation(async (cmd) => {
+      if (cmd === "list_accounts") return [account("A")];
+      if (cmd === "get_google_access_token")
+        throw "token endpoint returned 400 Bad Request: invalid_grant";
+      throw `unexpected ${cmd}`;
+    });
+    await expect(getAccessToken()).rejects.toMatchObject({
+      message: expect.stringContaining("Re-grant access"),
+    });
+  });
+
+  it("wraps plain-string command errors so the message is never blank", async () => {
+    mockInvoke.mockImplementation(async (cmd) => {
+      if (cmd === "list_accounts") return [account("A")];
+      if (cmd === "get_google_access_token") throw "token request failed";
+      throw `unexpected ${cmd}`;
+    });
+    const err = await getAccessToken().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe("token request failed");
   });
 });
