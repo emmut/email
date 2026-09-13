@@ -70,6 +70,7 @@ jobs:
               set -euo pipefail
               install -d -m 700 /tmp/flatpak-gnupg
               printf "%s" "$FLATPAK_GPG_PRIVATE_KEY" | GNUPGHOME=/tmp/flatpak-gnupg gpg --batch --import
+              ostree init --repo=site/repo --mode=archive-z2
               flatpak build-import-bundle \
                 --gpg-sign="$FLATPAK_GPG_KEY_ID" \
                 --gpg-homedir=/tmp/flatpak-gnupg \
