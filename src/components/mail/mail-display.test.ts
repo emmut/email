@@ -4,13 +4,16 @@ import { createHash } from "crypto";
 import { readFileSync } from "fs";
 
 import {
+  forwardDraft,
+  replyDraft,
+} from "@/components/mail/mail-display";
+import {
+  emailBridgeMessage,
   emailIframeSandbox,
   emailLinkBridgeScriptHash,
   emailSrcDoc,
   externalEmailLink,
-  forwardDraft,
-  replyDraft,
-} from "@/components/mail/mail-display";
+} from "@/components/mail/email-link-bridge";
 import { mailBody } from "@/test/fixtures";
 
 describe("replyDraft", () => {
@@ -100,6 +103,43 @@ describe("email body iframe", () => {
     expect(externalEmailLink("mailto:hello@example.com")).toBe(
       "mailto:hello@example.com",
     );
+  });
+
+  it("parses bridge messages from the iframe's opaque origin", () => {
+    const ready = new MessageEvent("message", {
+      data: { type: "email:bridge-ready" },
+      origin: "null",
+    });
+    const openLink = new MessageEvent("message", {
+      data: {
+        type: "email:open-external-link",
+        href: "https://example.com/path",
+      },
+      origin: "null",
+    });
+
+    expect(emailBridgeMessage(ready, null)).toEqual({ type: "ready" });
+    expect(emailBridgeMessage(openLink, null)).toEqual({
+      type: "open-link",
+      href: "https://example.com/path",
+    });
+  });
+
+  it("rejects untrusted bridge messages", () => {
+    const wrongSource = new MessageEvent("message", {
+      data: { type: "email:bridge-ready" },
+      origin: "https://example.com",
+    });
+    const unsafeLink = new MessageEvent("message", {
+      data: {
+        type: "email:open-external-link",
+        href: "javascript:alert(1)",
+      },
+      origin: "null",
+    });
+
+    expect(emailBridgeMessage(wrongSource, window)).toBeNull();
+    expect(emailBridgeMessage(unsafeLink, null)).toBeNull();
   });
 
   it("allow-lists the inline bridge script in the release CSP", () => {
