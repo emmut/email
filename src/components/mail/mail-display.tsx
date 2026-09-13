@@ -120,6 +120,26 @@ export function forwardDraft(body: MailBody): ComposeDraft {
 
 const emailLinkMessageType = "email:open-external-link";
 
+// Trusted bridge injected into the email iframe. It runs in an opaque-origin
+// sandbox, so it can only reach out via postMessage. The release CSP in
+// src-tauri/tauri.conf.json allow-lists this exact inline script by cryptographic
+// hash; if you change a single byte here you MUST recompute that hash and update
+// the config, otherwise links silently stop opening in release builds.
+const emailLinkBridgeScript = `document.addEventListener("click", function (event) {
+  var target = event.target;
+  var link = target instanceof Element ? target.closest("a[href]") : null;
+  if (!link) {
+    return;
+  }
+  event.preventDefault();
+  parent.postMessage({ type: "email:open-external-link", href: link.href }, "*");
+});`;
+
+// sha256 of emailLinkBridgeScript, as written into the production CSP.
+// Keep tauri.conf.json > app > security > csp > script-src in sync.
+export const emailLinkBridgeScriptHash =
+  "sha256-vCjuz9Yu1FgdwvI8Y6k7H9u2L7BPRv9IS98zGydfEy4=";
+
 // Wrap sanitized email HTML in a minimal document: light color-scheme (email
 // HTML assumes a white background), responsive images, and a small trusted
 // bridge which sends clicked links back to the app for OS-level opening.
@@ -130,17 +150,7 @@ export function emailSrcDoc(html: string) {
     img { max-width: 100%; height: auto }
     pre { white-space: pre-wrap }
     blockquote { margin: 0 0 0 8px; padding-left: 8px; border-left: 2px solid #ccc; color: #555 }
-  </style><script>
-    document.addEventListener("click", function (event) {
-      var target = event.target;
-      var link = target instanceof Element ? target.closest("a[href]") : null;
-      if (!link) {
-        return;
-      }
-      event.preventDefault();
-      parent.postMessage({ type: "${emailLinkMessageType}", href: link.href }, "*");
-    });
-  </script></head><body>${html}</body></html>`;
+  </style><script>${emailLinkBridgeScript}</script></head><body>${html}</body></html>`;
 }
 
 // The iframe gets a unique origin. Its only script is the bridge above; email
