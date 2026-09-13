@@ -45,32 +45,50 @@ export function resetGoogleAccountId() {
   googleAccountIdPromise = null;
 }
 
-export async function getAccessToken(): Promise<string> {
-  // Prefer the currently active account (set by AccountContext) when present.
-  const active = localStorage.getItem("activeAccountId");
-  if (active) {
-    try {
-      return await invoke("get_google_access_token", { account_id: active });
-    } catch (err) {
-      // If the active account can't refresh, fall back to legacy resolution.
-      resetGoogleAccountId();
-    }
+// A revoked/expired refresh token makes the token endpoint answer
+// 400 invalid_grant — every Gmail call then fails before the API is reached.
+// Translate that into something the user can act on; Tauri command errors
+// arrive as plain strings, which also produce a blank "Action failed:".
+function withTokenRenewHint(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("invalid_grant")) {
+    return new Error(
+      "Gmail access expired or was revoked, so actions can't be sent. Re-grant access under Settings → Accounts.",
+    );
   }
+  return err instanceof Error ? err : new Error(msg);
+}
 
-  const accountId = await findGoogleAccountId();
-  if (accountId) {
-    try {
-      return await invoke("get_google_access_token", { account_id: accountId });
-    } catch (err) {
-      // Belt and braces: the cached id may point at a removed account row.
-      // Re-resolve once; rethrow if the account genuinely can't refresh.
-      resetGoogleAccountId();
-      const freshId = await findGoogleAccountId();
-      if (freshId && freshId !== accountId) {
-        return invoke("get_google_access_token", { account_id: freshId });
+export async function getAccessToken(): Promise<string> {
+  try {
+    // Prefer the currently active account (set by AccountContext) when present.
+    const active = localStorage.getItem("activeAccountId");
+    if (active) {
+      try {
+        return await invoke("get_google_access_token", { account_id: active });
+      } catch (err) {
+        // If the active account can't refresh, fall back to legacy resolution.
+        resetGoogleAccountId();
       }
-      throw err;
     }
+
+    const accountId = await findGoogleAccountId();
+    if (accountId) {
+      try {
+        return await invoke("get_google_access_token", { account_id: accountId });
+      } catch (err) {
+        // Belt and braces: the cached id may point at a removed account row.
+        // Re-resolve once; rethrow if the account genuinely can't refresh.
+        resetGoogleAccountId();
+        const freshId = await findGoogleAccountId();
+        if (freshId && freshId !== accountId) {
+          return invoke("get_google_access_token", { account_id: freshId });
+        }
+        throw err;
+      }
+    }
+    return invoke("get_access_token");
+  } catch (err) {
+    throw withTokenRenewHint(err);
   }
-  return invoke("get_access_token");
 }

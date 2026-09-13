@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cn, compareNames, nextSelectedId } from "@/lib/utils";
+import { cn, compareNames, errMessage, nextSelectedId } from "@/lib/utils";
 
 describe("cn", () => {
   it("merges conflicting tailwind classes, last one wins", () => {
@@ -29,6 +29,27 @@ describe("nextSelectedId", () => {
 
   it("returns null when the removed mail is not in the list", () => {
     expect(nextSelectedId(ids, "x")).toBeNull();
+  });
+});
+
+describe("errMessage", () => {
+  it("uses the Error message", () => {
+    expect(errMessage(new Error("Google API 429: boom"))).toBe(
+      "Google API 429: boom",
+    );
+  });
+
+  it("never returns blank for a plain-string reject (Tauri command errors)", () => {
+    expect(errMessage("token endpoint returned 400: invalid_grant")).toBe(
+      "token endpoint returned 400: invalid_grant",
+    );
+    expect(errMessage("")).toBe("Unknown error");
+    expect(errMessage(undefined)).toBe("Unknown error");
+    expect(errMessage(null)).toBe("Unknown error");
+  });
+
+  it("falls back for an Error with an empty message", () => {
+    expect(errMessage(new Error(""))).toBe("Unknown error");
   });
 });
 

@@ -96,7 +96,7 @@ describe("useMailActions (Gmail)", () => {
   });
 
   it("rolls the cache back when the server rejects", async () => {
-    gmailApi.trashMessage.mockRejectedValue(new Error("Google API 500: boom"));
+    gmailApi.trashMessage.mockRejectedValue(new Error("Google API 400: boom"));
     const { client, result } = setup();
     result.current.act("trash", "m2");
 
@@ -107,6 +107,42 @@ describe("useMailActions (Gmail)", () => {
     await waitFor(() => {
       expect(client.getQueryData<Mail[]>(LIST_KEY)).toHaveLength(2);
     });
+    expect(queue.queueGmailAction).not.toHaveBeenCalled();
+  });
+
+  it("queues rate-limited actions instead of failing", async () => {
+    gmailApi.archiveMessage.mockRejectedValue(
+      new Error("Google API 429: quota exceeded"),
+    );
+    const { result } = setup();
+    result.current.act("archive", "m1");
+
+    await waitFor(() =>
+      expect(queue.queueGmailAction).toHaveBeenCalledWith("m1", "archive"),
+    );
+  });
+
+  it("queues transient server errors instead of failing", async () => {
+    gmailApi.archiveMessage.mockRejectedValue(
+      new Error("Google API 503: service unavailable"),
+    );
+    const { result } = setup();
+    result.current.act("archive", "m1");
+
+    await waitFor(() =>
+      expect(queue.queueGmailAction).toHaveBeenCalledWith("m1", "archive"),
+    );
+  });
+
+  it("surfaces revoked-token errors without queuing them", async () => {
+    gmailApi.markRead.mockRejectedValue(
+      new Error("token endpoint returned 400 Bad Request: invalid_grant"),
+    );
+    const { result } = setup();
+    result.current.act("read", "m1");
+
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+    expect(result.current.error?.message).toContain("invalid_grant");
     expect(queue.queueGmailAction).not.toHaveBeenCalled();
   });
 

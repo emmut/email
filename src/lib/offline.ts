@@ -69,10 +69,14 @@ export function useOnline(): boolean {
 }
 
 /// Distinguish "network unreachable" from "server said no". Queue on the
-/// former, surface the latter.
+/// former, surface the latter. Rate limits (429) and transient server errors
+/// (5xx) are recoverable, so those are queued too — Gmail throttles bursts of
+/// modify calls (e.g. marking a read mail in rapid triage), and failing a
+/// whole action over that is worse than letting the queue replay it.
 export function isNetworkError(err: unknown): boolean {
   if (typeof navigator !== "undefined" && !navigator.onLine) return true;
   const msg = err instanceof Error ? err.message : String(err);
+  if (/^Google API (429|5\d\d)/.test(msg)) return true;
   if (/^Google API \d/.test(msg)) return false; // HTTP response = server reached
   return /connect|connection|network|timed? ?out|dns|unreachable|error sending request/i.test(
     msg,

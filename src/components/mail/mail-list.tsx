@@ -36,7 +36,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSettings } from "@/lib/settings";
-import { cn } from "@/lib/utils";
+import { cn, errMessage } from "@/lib/utils";
 import type { Mail } from "@/components/mail/data";
 import { tagsQuery } from "@/lib/gmail";
 import {
@@ -121,7 +121,7 @@ export function MailList({
     <ScrollArea className="h-full">
       {(actError || moveError) && (
         <p className="text-destructive px-4 pt-3 text-xs">
-          Action failed: {(actError ?? moveError)?.message}
+          Action failed: {errMessage(actError ?? moveError)}
         </p>
       )}
       <div className="flex flex-col gap-2 p-4">

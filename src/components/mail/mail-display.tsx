@@ -43,6 +43,7 @@ import { useMailActions, type JunkAction } from "@/hooks/use-mail-actions";
 import { mailBodyQuery, profileQuery, type MailBody } from "@/lib/gmail";
 import { icloudMessageBodyQuery, parseIcloudMailId } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
+import { errMessage } from "@/lib/utils";
 
 function splitAddresses(raw: string): string[] {
   return raw
@@ -462,7 +463,7 @@ export function MailDisplay({
       <ComposeDialog draft={draft} onClose={() => setDraft(null)} />
       {actError && (
         <p className="text-destructive px-4 pb-2 text-xs">
-          Action failed: {actError.message}
+          Action failed: {errMessage(actError)}
         </p>
       )}
       <Separator />
