@@ -1,7 +1,11 @@
+/// <reference types="node" />
 import { describe, expect, it } from "vitest";
+import { createHash } from "crypto";
+import { readFileSync } from "fs";
 
 import {
   emailIframeSandbox,
+  emailLinkBridgeScriptHash,
   emailSrcDoc,
   externalEmailLink,
   forwardDraft,
@@ -96,6 +100,21 @@ describe("email body iframe", () => {
     expect(externalEmailLink("mailto:hello@example.com")).toBe(
       "mailto:hello@example.com",
     );
+  });
+
+  it("allow-lists the inline bridge script in the release CSP", () => {
+    const doc = emailSrcDoc("");
+    const script = doc.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    expect(script).toBeTruthy();
+    const hash = `sha256-${createHash("sha256").update(script!).digest("base64")}`;
+
+    const config = JSON.parse(
+      readFileSync("src-tauri/tauri.conf.json", "utf8"),
+    ) as { app: { security: { csp: Record<string, string> } } };
+    const scriptSrc = config.app.security.csp["script-src"];
+
+    expect(hash).toBe(emailLinkBridgeScriptHash);
+    expect(scriptSrc).toContain(emailLinkBridgeScriptHash);
   });
 
   it("rejects unsafe or malformed email links", () => {
