@@ -1,0 +1,112 @@
+name: Publish Flatpak repository
+
+on:
+  # build.yml creates the GitHub release first and only completes after all
+  # artifacts, including Email.flatpak, have been uploaded.
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish (for example v0.1.2-alpha)"
+        required: true
+        type: string
+  # Validate the importer, signing key, and Pages artifact before merging
+  # changes to the publishing pipeline. PR runs never deploy.
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-flatpak-repo.yml"
+      - "packaging/flatpak/**"
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build-repository:
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
+      FLATPAK_GPG_KEY_ID: 0D6FAF91DA2D54EE
+      FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Use latest release for PR validation
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "RELEASE_TAG=$(gh release view --json tagName --jq .tagName)" >> "$GITHUB_ENV"
+
+      - name: Validate release tag
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::invalid release tag: $RELEASE_TAG"
+            exit 1
+          fi
+
+      - name: Download Flatpak release bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$RELEASE_TAG" --pattern Email.flatpak --dir flatpak-input
+
+      - name: Create signed Flatpak repository
+        run: |
+          mkdir -p site/repo
+          docker run --rm --privileged \
+            --volume "$PWD:/src" --workdir /src \
+            --env FLATPAK_GPG_KEY_ID --env FLATPAK_GPG_PRIVATE_KEY \
+            ghcr.io/flathub-infra/flatpak-github-actions:gnome-49 \
+            bash -c '
+              set -euo pipefail
+              install -d -m 700 /tmp/flatpak-gnupg
+              printf "%s" "$FLATPAK_GPG_PRIVATE_KEY" | GNUPGHOME=/tmp/flatpak-gnupg gpg --batch --import
+              flatpak build-import-bundle \
+                --gpg-sign="$FLATPAK_GPG_KEY_ID" \
+                --gpg-homedir=/tmp/flatpak-gnupg \
+                --update-appstream \
+                site/repo flatpak-input/Email.flatpak
+              flatpak build-update-repo \
+                --gpg-import=packaging/flatpak/repository-signing-key.asc \
+                --gpg-sign="$FLATPAK_GPG_KEY_ID" \
+                --gpg-homedir=/tmp/flatpak-gnupg \
+                --generate-static-deltas --prune \
+                --title=Email \
+                --comment="Personal desktop email client" \
+                --homepage=https://github.com/emmut/email \
+                --icon=https://emmut.github.io/email/icon.png \
+                site/repo
+            '
+          cp packaging/flatpak/email.flatpakrepo site/email.flatpakrepo
+          cp packaging/flatpak/com.emiljansson.email.flatpakref site/com.emiljansson.email.flatpakref
+          cp src-tauri/icons/128x128@2x.png site/icon.png
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build-repository
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v6
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

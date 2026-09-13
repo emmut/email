@@ -1,0 +1,9 @@
+[Flatpak Repo]
+Title=Email
+Url=https://emmut.github.io/email/repo/
+Homepage=https://github.com/emmut/email
+Comment=Personal desktop email client
+Description=Signed Flatpak repository for the Email desktop client
+Icon=https://emmut.github.io/email/icon.png
+DefaultBranch=master
+GPGKey=mDMEaqasGhYJKwYBBAHaRw8BAQdAC5CjSprYFtnfvUxN4p56+jmO/IzRejJc/XI93IJeiuG0MkVtYWlsIEZsYXRwYWsgUmVwb3NpdG9yeSA8ZmxhdHBha0BlbWlsamFuc3Nvbi5jb20+iJAEExYKADgWIQTqNqNbOKlHsSRsHtoNb6+R2i1U7gUCaqasGgIbAwULCQgHAgYVCgkICwIEFgIDAQIeAQIXgAAKCRANb6+R2i1U7nR6AP0RfJBjAmNfxWHcTSCaSRWwKmDQf/cb2fO8c9cZ5hTMnAEA2HvnOsEvek4Bji4Vnujo/Xbra8oWTZLOEAZqJIBxpgg=

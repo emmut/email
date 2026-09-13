@@ -1,0 +1,11 @@
+[Flatpak Ref]
+Title=Email
+Name=com.emiljansson.email
+Branch=master
+Url=https://emmut.github.io/email/repo/
+SuggestRemoteName=email
+Homepage=https://github.com/emmut/email
+Icon=https://emmut.github.io/email/icon.png
+RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+IsRuntime=false
+GPGKey=mDMEaqasGhYJKwYBBAHaRw8BAQdAC5CjSprYFtnfvUxN4p56+jmO/IzRejJc/XI93IJeiuG0MkVtYWlsIEZsYXRwYWsgUmVwb3NpdG9yeSA8ZmxhdHBha0BlbWlsamFuc3Nvbi5jb20+iJAEExYKADgWIQTqNqNbOKlHsSRsHtoNb6+R2i1U7gUCaqasGgIbAwULCQgHAgYVCgkICwIEFgIDAQIeAQIXgAAKCRANb6+R2i1U7nR6AP0RfJBjAmNfxWHcTSCaSRWwKmDQf/cb2fO8c9cZ5hTMnAEA2HvnOsEvek4Bji4Vnujo/Xbra8oWTZLOEAZqJIBxpgg=

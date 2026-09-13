@@ -122,16 +122,28 @@ Notes:
 
 ## Install on Linux with Flatpak
 
-Every GitHub release includes an `Email.flatpak` bundle. Download it from the
-release page and install it locally:
+For automatic updates, add the signed Email repository and install the app:
+
+```bash
+flatpak remote-add --user --if-not-exists email \
+  https://emmut.github.io/email/email.flatpakrepo
+flatpak install --user email com.emiljansson.email
+```
+
+The repository appears as an application source in Flatpak-aware software
+centers such as KDE Discover. You can also download and open
+[`com.emiljansson.email.flatpakref`](https://emmut.github.io/email/com.emiljansson.email.flatpakref)
+for a one-click installation. Updates arrive through `flatpak update` and
+Discover's normal update flow.
+
+Alternatively, every GitHub release includes an `Email.flatpak` bundle for
+manual installation. Download it from the release page and run:
 
 ```bash
 flatpak install --user ./Email.flatpak
 ```
 
-The bundle is self-contained, but it is not an update repository. Install a
-new bundle from a later release to update the app; Flatpak preserves its data
-under `~/.var/app/com.emiljansson.email`.
+Flatpak preserves app data under `~/.var/app/com.emiljansson.email`.
 
 To build the Flatpak locally, first build the Tauri deb, then stage and wrap it:
 

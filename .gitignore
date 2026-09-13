@@ -39,3 +39,5 @@ packaging/flatpak/*.flatpak
 .flatpak-builder/
 flatpak-build/
 flatpak-repo/
+flatpak-input/
+site/
