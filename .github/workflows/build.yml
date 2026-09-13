@@ -78,7 +78,7 @@ jobs:
       - name: Install Linux and Flatpak dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev flatpak flatpak-builder
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
       - uses: pnpm/action-setup@v6
 
@@ -101,11 +101,11 @@ jobs:
 
       - name: Build Flatpak bundle
         run: |
-          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive flathub org.gnome.Platform//49 org.gnome.Sdk//49
           cp src-tauri/target/release/bundle/deb/*.deb packaging/flatpak/email.deb
-          flatpak-builder --user --force-clean --repo=flatpak-repo flatpak-build packaging/flatpak/com.emiljansson.email.yml
-          flatpak build-bundle flatpak-repo packaging/flatpak/Email.flatpak com.emiljansson.email
+          docker run --rm --privileged \
+            --volume "$PWD:/src" --workdir /src \
+            ghcr.io/flathub-infra/flatpak-github-actions:gnome-49 \
+            bash -c 'flatpak-builder --disable-rofiles-fuse --force-clean --repo=flatpak-repo flatpak-build packaging/flatpak/com.emiljansson.email.yml && flatpak build-bundle flatpak-repo packaging/flatpak/Email.flatpak com.emiljansson.email'
 
       - uses: actions/upload-artifact@v7
         with:
@@ -193,7 +193,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev flatpak flatpak-builder
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
       - uses: pnpm/action-setup@v6
 
@@ -232,11 +232,11 @@ jobs:
       - name: Build Flatpak bundle
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive flathub org.gnome.Platform//49 org.gnome.Sdk//49
           cp src-tauri/target/release/bundle/deb/*.deb packaging/flatpak/email.deb
-          flatpak-builder --user --force-clean --repo=flatpak-repo flatpak-build packaging/flatpak/com.emiljansson.email.yml
-          flatpak build-bundle flatpak-repo packaging/flatpak/Email.flatpak com.emiljansson.email
+          docker run --rm --privileged \
+            --volume "$PWD:/src" --workdir /src \
+            ghcr.io/flathub-infra/flatpak-github-actions:gnome-49 \
+            bash -c 'flatpak-builder --disable-rofiles-fuse --force-clean --repo=flatpak-repo flatpak-build packaging/flatpak/com.emiljansson.email.yml && flatpak build-bundle flatpak-repo packaging/flatpak/Email.flatpak com.emiljansson.email'
 
       - name: Build Arch package
         if: matrix.container
