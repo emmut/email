@@ -12,6 +12,7 @@ interface AccountContextValue {
   activeAccountId: string | null;
   activeAccount: Account | null;
   isLoading: boolean;
+  accountsError: Error | null;
   switchAccount: (id: string) => Promise<void>;
   addGoogleAccount: () => Promise<void>;
   addICloudAccount: (email: string, appPassword: string) => Promise<void>;
@@ -27,28 +28,52 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
   const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
-  const { data: accounts = [], isLoading, refetch } = useQuery(accountsQuery);
+  const {
+    data: accounts = [],
+    isLoading,
+    error: accountsError,
+    refetch,
+  } = useQuery(accountsQuery);
 
   // Load active account from localStorage on mount
   useEffect(() => {
+    if (isLoading) return;
     const stored = localStorage.getItem("activeAccountId");
-    if (stored && accounts.some((a) => a.id === stored)) {
+    if (accounts.length === 0) {
+      setActiveAccountId(null);
+      localStorage.removeItem("activeAccountId");
+    } else if (stored && accounts.some((a) => a.id === stored)) {
       setActiveAccountId(stored);
-    } else if (accounts.length > 0) {
+    } else {
       // Default to first (default) account
       const defaultAcc = accounts.find((a) => a.is_default) ?? accounts[0];
       setActiveAccountId(defaultAcc.id);
       localStorage.setItem("activeAccountId", defaultAcc.id);
     }
     setHydrated(true);
-  }, [accounts]);
+  }, [accounts, isLoading]);
 
   const activeAccount = accounts.find((a) => a.id === activeAccountId) ?? null;
 
+  const selectAccount = (id: string) => {
+    localStorage.setItem("activeAccountId", id);
+    setActiveAccountId(id);
+  };
+
+  const cacheAddedAccount = (account: Account) => {
+    queryClient.setQueryData<Account[]>(accountsQuery.queryKey, (current = []) => {
+      const next = current.filter((item) => item.id !== account.id);
+      return [
+        ...next,
+        current.length === 0 ? { ...account, is_default: true } : account,
+      ];
+    });
+    selectAccount(account.id);
+  };
+
   const switchAccount = useMutation({
     mutationFn: async (id: string) => {
-      localStorage.setItem("activeAccountId", id);
-      setActiveAccountId(id);
+      selectAccount(id);
       // Invalidate all mail queries
       queryClient.invalidateQueries({ queryKey: ["mail"] });
       queryClient.invalidateQueries({ queryKey: ["gmail"] });
@@ -58,11 +83,12 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
 
   const addGoogleAccount = useMutation({
     mutationFn: () => invoke<Account>("add_google_account", { display_name: undefined }),
-    onSuccess: () => {
+    onSuccess: async (account) => {
       resetGoogleAccountId();
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      cacheAddedAccount(account);
+      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
       // Fresh grant: any lists that failed under the old token can retry.
-      queryClient.invalidateQueries({ queryKey: ["gmail"] });
+      await queryClient.invalidateQueries({ queryKey: ["gmail"] });
     },
   });
 
@@ -77,26 +103,28 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
         smtp_server: undefined,
         smtp_port: undefined,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    onSuccess: async (account) => {
+      cacheAddedAccount(account);
+      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
   });
 
   const removeAccount = useMutation({
     mutationFn: (id: string) => invoke("remove_account", { account_id: id }),
-    onSuccess: (_, id) => {
+    onSuccess: async (_, id) => {
       resetGoogleAccountId();
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      const remaining = accounts.filter((a) => a.id !== id);
+      queryClient.setQueryData<Account[]>(accountsQuery.queryKey, remaining);
       if (activeAccountId === id) {
-        // Switch to another account if available
-        const remaining = accounts.filter((a) => a.id !== id);
         if (remaining.length > 0) {
-          switchAccount.mutate(remaining[0].id);
+          const next = remaining.find((account) => account.is_default) ?? remaining[0];
+          selectAccount(next.id);
         } else {
           setActiveAccountId(null);
           localStorage.removeItem("activeAccountId");
         }
       }
+      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
   });
 
@@ -120,6 +148,7 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
         activeAccountId,
         activeAccount,
         isLoading: isLoading || !hydrated,
+        accountsError,
         switchAccount: (id) => switchAccount.mutateAsync(id).then(() => {}),
         addGoogleAccount: () => addGoogleAccount.mutateAsync().then(() => {}),
         addICloudAccount: (email, appPassword) => addICloudAccount.mutateAsync({ email, appPassword }).then(() => {}),

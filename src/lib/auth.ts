@@ -5,6 +5,7 @@ import type { Account } from "@/types/account";
 // `pnpm dev` in a plain browser has no Tauri backend — pretend we're signed in
 // so the mock inbox stays reachable.
 const inTauri = isTauri();
+export const isDesktopApp = inTauri;
 
 export const authStatusQuery = queryOptions({
   queryKey: ["auth", "status"],

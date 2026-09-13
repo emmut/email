@@ -7,6 +7,7 @@ import {
   SlidersHorizontal,
   SquarePen,
   Users,
+  UserPlus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -16,6 +17,14 @@ import { RulesSection } from "@/components/settings/rules-section";
 import { ShortcutsSection } from "@/components/settings/shortcuts-section";
 import { SignatureSection } from "@/components/settings/signature-section";
 import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -146,12 +155,42 @@ function SettingsPage() {
             </div>
             {section === "general" && <GeneralSection />}
             {section === "accounts" && <AccountsSection />}
-            {section === "rules" && <RulesSection />}
-            {section === "signature" && <SignatureSection />}
+            {section === "rules" &&
+              (activeAccount ? (
+                <RulesSection />
+              ) : (
+                <NoAccount onConnect={() => setSection("accounts")} />
+              ))}
+            {section === "signature" &&
+              (activeAccount ? (
+                <SignatureSection />
+              ) : (
+                <NoAccount onConnect={() => setSection("accounts")} />
+              ))}
             {section === "shortcuts" && <ShortcutsSection />}
           </main>
         </ScrollArea>
       </div>
     </div>
+  );
+}
+
+function NoAccount({ onConnect }: { onConnect: () => void }) {
+  return (
+    <Empty className="min-h-72 border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <UserPlus />
+        </EmptyMedia>
+        <EmptyTitle>Connect an account first</EmptyTitle>
+        <EmptyDescription>
+          Account-specific settings become available after you add Gmail or
+          iCloud Mail.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button onClick={onConnect}>Go to accounts</Button>
+      </EmptyContent>
+    </Empty>
   );
 }
