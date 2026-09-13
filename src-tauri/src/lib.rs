@@ -1,5 +1,7 @@
 mod account;
 mod db;
+#[cfg(target_os = "linux")]
+mod linux_window;
 mod oauth;
 #[cfg(target_os = "macos")]
 mod updater;
@@ -17,6 +19,11 @@ pub fn run() {
                 AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu,
                 HELP_SUBMENU_ID, WINDOW_SUBMENU_ID,
             };
+
+            // The window starts hidden so Linux can choose the desktop's
+            // native decoration provider before GTK realizes it.
+            #[cfg(target_os = "linux")]
+            linux_window::use_native_decorations(app)?;
 
             // Native app menu: macOS menu bar, GTK in-window menubar, and
             // DBus-exported global menus (KDE Plasma) all render this Menu.
@@ -181,6 +188,10 @@ pub fn run() {
             app.manage(account::ImapPool::default());
             let cache_db = db::CacheDb::new(app.handle())?;
             app.manage(cache_db);
+
+            if let Some(window) = app.get_webview_window("main") {
+                window.show()?;
+            }
 
             // Start Sparkle (scheduled update checks); setup runs on the
             // main thread, which Sparkle requires.

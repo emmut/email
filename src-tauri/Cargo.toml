@@ -40,3 +40,6 @@ native-tls = "0.2"
 imap-proto = "0.10"
 lettre = { version = "0.11", features = ["tokio1-native-tls"] }
 tokio = { version = "1", features = ["full"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
