@@ -74,11 +74,22 @@ How the pieces fit together:
   `tauri.conf.json` embeds the framework in the bundle.
 - `src-tauri/src/updater.rs` starts a `SPUStandardUpdaterController` at launch
   (skipped when not running from an `.app` bundle, i.e. `tauri dev`).
+- `bundle.macOS.signingIdentity` is `-` so Tauri ad-hoc signs the complete
+  `.app`, including its resources and embedded framework. The Apple Silicon
+  linker's signature on the executable alone does not seal the app bundle and
+  can fail Sparkle's code-signature validation. Hardened Runtime is disabled
+  for this certificate-free build, avoiding library validation failures with
+  ad-hoc signed code. Developer ID signing/notarization is a separate setup.
 - `SUFeedURL` in `src-tauri/Info.plist` points at
   `releases/latest/download/appcast.xml`; CI generates and attaches
   `appcast.xml` to every `v*` release (`scripts/generate-appcast.sh`), signing
   the dmg with EdDSA (`scripts/sign_update.py`). The EdDSA signature is what
-  lets Sparkle install updates without a Developer ID / notarization.
+  authenticates the update archive without a Developer ID / notarization;
+  the enclosed app must also have a valid bundle signature.
+- CI builds and verifies a signed macOS app on PRs, rejects a copy with a
+  modified `Info.plist`, and verifies each release app before uploading its
+  DMG. To check a local build, run
+  `bash scripts/verify-macos-update.sh src-tauri/target/release/bundle/macos/Email.app`.
 
 One-time setup for a fork (or to rotate keys):
 
