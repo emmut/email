@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
+      - name: Validate synchronized release versions
+        run: node scripts/check-release-version.mjs
       - name: Validate GitHub Actions workflows
         uses: docker://rhysd/actionlint:1.7.7
       - uses: ./.github/actions/setup-build

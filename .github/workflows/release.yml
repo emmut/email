@@ -1,12 +1,26 @@
 name: Release
 on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      GOOGLE_OAUTH_CLIENT_ID:
+        required: false
+      GOOGLE_OAUTH_CLIENT_SECRET:
+        required: false
+      SPARKLE_ED_PRIVATE_KEY:
+        required: true
+      FLATPAK_GPG_PRIVATE_KEY:
+        required: true
   push:
     tags:
       - v*
   workflow_dispatch:
     inputs:
-      version:
-        description: Version to release, no leading v (e.g. 0.1.5)
+      tag:
+        description: Existing release tag to retry (e.g. v0.1.5-alpha)
         required: true
         type: string
 permissions:
@@ -23,30 +37,8 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v6
-        if: github.event_name == 'workflow_dispatch'
-        with:
-          node-version: 22
-      # GITHUB_TOKEN tag pushes do not start another workflow. Both entry
-      # points continue through the same reusable builders below.
-      - name: Bump version, commit, tag, push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          bash scripts/release.sh "$VERSION"
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          VERSION: ${{ inputs.version }}
       - name: Prepare draft release
         run: |
-          if [ "$EVENT_NAME" = workflow_dispatch ]; then
-            RELEASE_TAG="v${VERSION#v}"
-          else
-            RELEASE_TAG="$TAG_REF"
-          fi
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
             echo "::error::invalid release tag: $RELEASE_TAG"
             exit 1
@@ -54,12 +46,18 @@ jobs:
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           if ! gh release view "$RELEASE_TAG" &>/dev/null; then
             gh release create "$RELEASE_TAG" --draft --verify-tag --notes "$RELEASE_NOTES"
+          else
+            # Preserve Release Please's changelog and retain the first-install
+            # instructions for this non-notarized macOS distribution.
+            NOTES=$(gh release view "$RELEASE_TAG" --json body --jq .body)
+            if [[ "$NOTES" != *"## macOS install"* ]]; then
+              printf '%s\n\n%s\n' "$NOTES" "$RELEASE_NOTES" > "$RUNNER_TEMP/release-notes.md"
+              gh release edit "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+            fi
           fi
         id: release
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          VERSION: ${{ inputs.version }}
-          TAG_REF: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_NOTES: |
