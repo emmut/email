@@ -1,39 +1,123 @@
 name: Release
-
-# Bumps the version, commits, tags, pushes, and builds — same as running
-# scripts/release.sh locally, except the tag pushed here (with GITHUB_TOKEN)
-# can't trigger build.yml, so this workflow calls it directly instead.
 on:
+  push:
+    tags:
+      - v*
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, no leading v (e.g. 0.1.1)"
+        description: Version to release, no leading v (e.g. 0.1.5)
         required: true
-
+        type: string
 permissions:
-  contents: write
-
+  contents: read
+concurrency:
+  # Serialize latest-feed and rolling repository changes across releases.
+  group: release
+  cancel-in-progress: false
 jobs:
-  tag:
+  prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Configure git
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          node-version: 22
+      # GITHUB_TOKEN tag pushes do not start another workflow. Both entry
+      # points continue through the same reusable builders below.
+      - name: Bump version, commit, tag, push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Bump version, commit, tag, push
+          bash scripts/release.sh "$VERSION"
+        if: github.event_name == 'workflow_dispatch'
         env:
           VERSION: ${{ inputs.version }}
-        run: scripts/release.sh "$VERSION"
-
-  build:
-    needs: tag
+      - name: Prepare draft release
+        run: |
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            RELEASE_TAG="v${VERSION#v}"
+          else
+            RELEASE_TAG="$TAG_REF"
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::invalid release tag: $RELEASE_TAG"
+            exit 1
+          fi
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          if ! gh release view "$RELEASE_TAG" &>/dev/null; then
+            gh release create "$RELEASE_TAG" --draft --verify-tag --notes "$RELEASE_NOTES"
+          fi
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VERSION: ${{ inputs.version }}
+          TAG_REF: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_NOTES: |
+            ## macOS install
+            The app is not notarized. After copying it to Applications, clear the quarantine flag:
+            ```
+            xattr -cr /Applications/Email.app
+            ```
+  macos:
+    needs: prepare
     permissions:
       contents: write
-    uses: ./.github/workflows/build.yml
+    uses: ./.github/workflows/build-macos.yml
     with:
-      version: ${{ inputs.version }}
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+  linux:
+    needs: prepare
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+  arch:
+    needs: prepare
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-arch.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+  publish:
+    # Do not move Sparkle's releases/latest redirect to a partial release.
+    needs:
+      - prepare
+      - macos
+      - linux
+      - arch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish complete release
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+  flatpak-repository:
+    needs:
+      - prepare
+      - publish
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/publish-flatpak-repo.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
     secrets: inherit

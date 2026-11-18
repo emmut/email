@@ -1,0 +1,74 @@
+name: Build macos release
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      GOOGLE_OAUTH_CLIENT_ID:
+        required: false
+      GOOGLE_OAUTH_CLIENT_SECRET:
+        required: false
+      SPARKLE_ED_PRIVATE_KEY:
+        required: true
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: ./.github/actions/setup-build
+        with:
+          release-tag: ${{ inputs.tag }}
+      - name: Build signed macOS app and DMG
+        run: pnpm tauri build --bundles dmg
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      - name: Verify macOS update bundle
+        run: bash scripts/verify-macos-update.sh src-tauri/target/release/bundle/macos/Email.app
+      - name: Reject a tampered update bundle
+        run: |
+          ditto src-tauri/target/release/bundle/macos/Email.app "$RUNNER_TEMP/Tampered.app"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleName Tampered' "$RUNNER_TEMP/Tampered.app/Contents/Info.plist"
+          if bash scripts/verify-macos-update.sh "$RUNNER_TEMP/Tampered.app"; then
+            echo "::error::The update bundle verifier accepted a modified Info.plist"
+            exit 1
+          fi
+      - name: Sign Sparkle update archive
+        run: |
+          shopt -s failglob
+          dmgs=(src-tauri/target/release/bundle/dmg/*.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one macOS update DMG"
+            exit 1
+          fi
+          VERSION="${RELEASE_TAG#v}"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/$(basename "${dmgs[0]}")"
+          bash scripts/generate-appcast.sh "${dmgs[0]}" "$VERSION" "$URL" appcast.xml
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: email-macos-latest
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            appcast.xml
+          if-no-files-found: error
+      - name: Attach macOS update to release
+        run: |
+          shopt -s failglob
+          files=(
+            src-tauri/target/release/bundle/dmg/*.dmg
+            appcast.xml
+          )
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}

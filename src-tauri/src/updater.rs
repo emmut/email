@@ -4,9 +4,9 @@
 //! tauri.conf.json; the appcast the updater polls is published to each GitHub
 //! release by CI (see scripts/generate-appcast.sh) and fetched from the
 //! stable `releases/latest/download/appcast.xml` URL in Info.plist
-//! (`SUFeedURL`). Update archives are EdDSA-signed (`SUPublicEDKey`), which
-//! is what lets Sparkle install them even though the app has no Developer ID
-//! signature.
+//! (`SUFeedURL`). Update archives are EdDSA-signed (`SUPublicEDKey`), and Tauri
+//! ad-hoc signs the complete app bundle. Both signatures must be valid;
+//! a Developer ID certificate is not required for this distribution.
 //!
 //! The bindings talk to the Objective-C runtime directly rather than through
 //! a crate: only three messages are needed (`alloc`, the designated

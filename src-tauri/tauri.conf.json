@@ -46,6 +46,8 @@
     "active": true,
     "targets": "all",
     "macOS": {
+      "signingIdentity": "-",
+      "hardenedRuntime": false,
       "files": {
         "Resources/Assets.car": "icons/Assets.car"
       },

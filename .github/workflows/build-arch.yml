@@ -1,0 +1,92 @@
+name: Build arch release
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      GOOGLE_OAUTH_CLIENT_ID:
+        required: false
+      GOOGLE_OAUTH_CLIENT_SECRET:
+        required: false
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    # Container run steps otherwise default to sh; packaging uses Bash arrays
+    # and substitutions just like the other platform workflows.
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Install Arch dependencies
+        run: pacman -Syu --noconfirm git github-cli zstd webkit2gtk-4.1 openssl appmenu-gtk-module libayatana-appindicator librsvg xdotool file
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: ./.github/actions/setup-build
+        with:
+          release-tag: ${{ inputs.tag }}
+          linux-dependencies: "false"
+      - name: Build native Arch binary
+        run: pnpm tauri build --bundles deb
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      - name: Build Arch package
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          cp src-tauri/target/release/bundle/deb/*.deb packaging/arch/email.deb
+          # pacman pkgver forbids hyphens. Strip rather than replace with _:
+          # vercmp orders 0.0.10alpha < 0.0.10 (prerelease before final) but
+          # 0.0.10_alpha > 0.0.10, which would block the final release.
+          sed -i "s/^pkgver=.*/pkgver=${VERSION//-/}/" packaging/arch/PKGBUILD
+          useradd -m builder
+          chown -R builder packaging/arch
+          cd packaging/arch
+          runuser -u builder -- makepkg --noconfirm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: email-arch
+          path: |
+            packaging/arch/*.pkg.tar.zst
+          if-no-files-found: error
+      - name: Attach Arch package to release
+        run: |
+          shopt -s failglob
+          files=(
+            packaging/arch/*.pkg.tar.zst
+          )
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+      - name: Publish to pacman repo
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          shopt -s failglob
+          mkdir pacman-repo
+          cp packaging/arch/*.pkg.tar.zst pacman-repo/
+          cd pacman-repo
+          # Fresh db each release: only the newest version is installable via
+          # pacman; older packages stay attached to arch-repo for manual
+          # downgrades.
+          repo-add email.db.tar.gz ./*.pkg.tar.zst
+          # pacman fetches plain email.db / email.files; repo-add only leaves
+          # symlinks with those names, and symlinks don't survive the upload
+          cp --remove-destination email.db.tar.gz email.db
+          cp --remove-destination email.files.tar.gz email.files
+          if ! gh release view arch-repo &>/dev/null; then
+            gh release create arch-repo --prerelease --latest=false \
+              --title "Arch package repository" \
+              --notes "Rolling pacman repository, updated by CI on every release. See the README's Updates section for pacman.conf setup."
+          fi
+          gh release upload arch-repo ./*.pkg.tar.zst email.db email.files --clobber

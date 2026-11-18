@@ -9,7 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "vitest run && node --test scripts/check-release-version.node-test.mjs",
+    "test": "vitest run && node --test scripts/*.node-test.mjs",
     "test:release-version": "node --test scripts/check-release-version.node-test.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

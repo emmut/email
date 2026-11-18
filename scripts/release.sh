@@ -40,7 +40,18 @@ grep -q '^version = "'"$VERSION"'"$' src-tauri/Cargo.toml || {
   echo "failed to set version in src-tauri/Cargo.toml" >&2
   exit 1
 }
-cargo metadata --manifest-path src-tauri/Cargo.toml --format-version 1 --no-deps >/dev/null
+# `cargo metadata --no-deps` does not refresh the lockfile's root package
+# version. Update that metadata directly without re-resolving dependencies.
+node --input-type=module - "$VERSION" <<'NODE'
+import { readFileSync, writeFileSync } from "node:fs";
+const path = "src-tauri/Cargo.lock";
+const lock = readFileSync(path, "utf8");
+const entry = /(\[\[package\]\]\nname = "email"\nversion = ")[^"]+(")/g;
+if ([...lock.matchAll(entry)].length !== 1) {
+  throw new Error("could not find the email package in Cargo.lock");
+}
+writeFileSync(path, lock.replace(entry, (_, start, end) => `${start}${process.argv[2]}${end}`));
+NODE
 
 git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
 git commit -m "🔖 v$VERSION"

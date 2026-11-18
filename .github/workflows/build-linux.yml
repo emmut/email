@@ -1,0 +1,60 @@
+name: Build linux release
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      GOOGLE_OAUTH_CLIENT_ID:
+        required: false
+      GOOGLE_OAUTH_CLIENT_SECRET:
+        required: false
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: ./.github/actions/setup-build
+        with:
+          release-tag: ${{ inputs.tag }}
+      - name: Build Linux packages
+        run: pnpm tauri build --bundles deb,rpm,appimage
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      - name: Build Flatpak bundle
+        run: |
+          cp src-tauri/target/release/bundle/deb/*.deb packaging/flatpak/email.deb
+          docker run --rm --privileged \
+            --volume "$PWD:/src" --workdir /src \
+            ghcr.io/flathub-infra/flatpak-github-actions:gnome-49 \
+            bash -c 'flatpak-builder --disable-rofiles-fuse --force-clean --repo=flatpak-repo flatpak-build packaging/flatpak/com.emiljansson.email.yml && flatpak build-bundle flatpak-repo packaging/flatpak/Email.flatpak com.emiljansson.email'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: email-ubuntu-22.04
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            packaging/flatpak/*.flatpak
+          if-no-files-found: error
+      - name: Attach Linux packages to release
+        run: |
+          shopt -s failglob
+          files=(
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            packaging/flatpak/*.flatpak
+          )
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}

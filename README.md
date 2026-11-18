@@ -74,11 +74,21 @@ How the pieces fit together:
   `tauri.conf.json` embeds the framework in the bundle.
 - `src-tauri/src/updater.rs` starts a `SPUStandardUpdaterController` at launch
   (skipped when not running from an `.app` bundle, i.e. `tauri dev`).
+- `bundle.macOS.signingIdentity` is `-` so Tauri ad-hoc signs the complete
+  `.app`, including its resources and embedded framework. The Apple Silicon
+  linker's signature on the executable alone does not seal the app bundle and
+  can fail Sparkle's code-signature validation. Hardened Runtime is disabled
+  for this certificate-free build, avoiding library validation failures with
+  ad-hoc signed code. Developer ID signing/notarization is a separate setup.
 - `SUFeedURL` in `src-tauri/Info.plist` points at
   `releases/latest/download/appcast.xml`; CI generates and attaches
   `appcast.xml` to every `v*` release (`scripts/generate-appcast.sh`), signing
   the dmg with EdDSA (`scripts/sign_update.py`). The EdDSA signature is what
-  lets Sparkle install updates without a Developer ID / notarization.
+  authenticates the update archive without a Developer ID / notarization;
+  the enclosed app must also have a valid bundle signature.
+- The macOS release workflow verifies the signed app and rejects a copy with a
+  modified `Info.plist` before uploading the DMG. To check a local build, run
+  `bash scripts/verify-macos-update.sh src-tauri/target/release/bundle/macos/Email.app`.
 
 One-time setup for a fork (or to rotate keys):
 
@@ -88,8 +98,9 @@ python3 scripts/generate-sparkle-keys.py
 
 Put the printed public key in `src-tauri/Info.plist` under `SUPublicEDKey`,
 and store the private key as the `SPARKLE_ED_PRIVATE_KEY` GitHub Actions
-secret (never commit it). If the secret is missing, release builds still work
-— CI just skips the appcast and in-app updates won't see that release.
+secret (never commit it). This secret is required for macOS releases: a failed
+update-signing step leaves the new release as a draft instead of replacing the
+working update feed with an incomplete release.
 
 ## Updates (Arch Linux)
 
@@ -165,6 +176,20 @@ and access to Secret Service for credential storage. It does not grant access
 to host files or the home directory.
 
 ## Develop
+
+### CI and releases
+
+- `.github/workflows/ci.yml` runs on PRs and pushes to `main`: workflow linting,
+  frontend tests, type checking, a frontend build, and Rust tests on one Linux
+  runner. PRs do not build native packages, use release secrets, or publish artifacts.
+- `.github/workflows/release.yml` runs for `v*` tag pushes and manual releases.
+  It calls separate reusable macOS, Linux (deb/rpm/AppImage/Flatpak), and Arch
+  build workflows with the same tag and inherited secrets. All builds share
+  `.github/actions/setup-build` for tools, caches, and dependency setup.
+- Releases stay in draft until every platform succeeds and the signed Sparkle
+  appcast is uploaded. The release then becomes public and the Flatpak
+  repository workflow signs and deploys the package repository to Pages. That
+  workflow can also be run manually for an existing release tag.
 
 ```bash
 pnpm install
