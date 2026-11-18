@@ -87,7 +87,7 @@ export function CommandPalette({
     setDefaultAccount,
   } = useAccount();
   const isIcloud = activeAccount?.kind === "icloud";
-  const { data: tags } = useQuery({ ...tagsQuery, enabled: open && !isIcloud });
+  const { data: tags } = useQuery({ ...tagsQuery(activeAccount?.id), enabled: open && !isIcloud });
 
   // Cmd/Ctrl+P arrives twice when the native menu accelerator fires AND the
   // key event still reaches the webview (platform-dependent) — debounce so
@@ -122,8 +122,8 @@ export function CommandPalette({
   };
 
   const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["gmail"] });
-    queryClient.invalidateQueries({ queryKey: ["icloud"] });
+    queryClient.invalidateQueries({ queryKey: ["gmail", activeAccount?.id] });
+    queryClient.invalidateQueries({ queryKey: ["icloud", activeAccount?.id] });
   };
 
   return (

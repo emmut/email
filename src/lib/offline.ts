@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { queryOptions, useQueryClient } from "@tanstack/react-query";
 
 import {
+  gmailAccountId,
   archiveMessage,
   junkMessage,
   markRead,
@@ -90,12 +91,19 @@ function enqueueOp(kind: string, payload: unknown) {
   });
 }
 
-export async function queueGmailAction(id: string, action: MailActionKind) {
-  await enqueueOp(`gmail:${action}`, { id });
+export async function queueGmailAction(
+  id: string,
+  action: MailActionKind,
+  accountId = gmailAccountId(),
+) {
+  await enqueueOp(`gmail:${action}`, { id, accountId });
 }
 
-export async function queueGmailSend(msg: OutgoingMail) {
-  await enqueueOp("gmail:send", msg);
+export async function queueGmailSend(
+  msg: OutgoingMail,
+  accountId = gmailAccountId(),
+) {
+  await enqueueOp("gmail:send", { ...msg, accountId });
 }
 
 export interface IcloudSendPayload {
@@ -153,7 +161,9 @@ export async function queueIcloudAction(
     return;
   }
   const targetFolder =
-    action === "archive" ? ICLOUD_FOLDER_NAMES.archive : ICLOUD_FOLDER_NAMES.trash;
+    action === "archive"
+      ? ICLOUD_FOLDER_NAMES.archive
+      : ICLOUD_FOLDER_NAMES.trash;
   await enqueueOp("icloud:move", { accountId, folder, uid, targetFolder });
   await invoke("cache_remove_message", {
     account_id: accountId,
@@ -166,19 +176,19 @@ function runOp(op: PendingOp): Promise<unknown> {
   const p = JSON.parse(op.payload);
   switch (op.kind) {
     case "gmail:read":
-      return markRead(p.id);
+      return markRead(p.id, p.accountId ?? "legacy");
     case "gmail:unread":
-      return markUnread(p.id);
+      return markUnread(p.id, p.accountId ?? "legacy");
     case "gmail:archive":
-      return archiveMessage(p.id);
+      return archiveMessage(p.id, p.accountId ?? "legacy");
     case "gmail:trash":
-      return trashMessage(p.id);
+      return trashMessage(p.id, p.accountId ?? "legacy");
     case "gmail:junk":
-      return junkMessage(p.id);
+      return junkMessage(p.id, p.accountId ?? "legacy");
     case "gmail:notJunk":
-      return notJunkMessage(p.id);
+      return notJunkMessage(p.id, p.accountId ?? "legacy");
     case "gmail:send":
-      return sendMessage(p as OutgoingMail);
+      return sendMessage(p as OutgoingMail, p.accountId ?? "legacy");
     case "icloud:read":
       return icloudMarkRead(p.accountId, p.folder, p.uid, p.read);
     case "icloud:move":

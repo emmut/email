@@ -74,10 +74,8 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
   const switchAccount = useMutation({
     mutationFn: async (id: string) => {
       selectAccount(id);
-      // Invalidate all mail queries
-      queryClient.invalidateQueries({ queryKey: ["mail"] });
-      queryClient.invalidateQueries({ queryKey: ["gmail"] });
-      queryClient.invalidateQueries({ queryKey: ["icloud"] });
+      // Mail queries are account-scoped. Reuse fresh cached data and let
+      // stale queries refresh when the new account's view mounts.
     },
   });
 
@@ -88,7 +86,7 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
       cacheAddedAccount(account);
       await queryClient.invalidateQueries({ queryKey: ["accounts"] });
       // Fresh grant: any lists that failed under the old token can retry.
-      await queryClient.invalidateQueries({ queryKey: ["gmail"] });
+      await queryClient.invalidateQueries({ queryKey: ["gmail", account.id] });
     },
   });
 

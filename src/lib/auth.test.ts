@@ -16,6 +16,7 @@ function account(id: string, kind = "google") {
 
 beforeEach(() => {
   mockInvoke.mockReset();
+  localStorage.clear();
   resetGoogleAccountId();
 });
 
@@ -96,4 +97,45 @@ describe("getAccessToken", () => {
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).message).toBe("token request failed");
   });
+});
+
+describe("explicit account tokens", () => {
+  it("uses the requested account even when another account is active", async () => {
+    localStorage.setItem("activeAccountId", "B");
+    mockInvoke.mockResolvedValue("token-A");
+    await expect(getAccessToken("A")).resolves.toBe("token-A");
+    expect(mockInvoke).toHaveBeenCalledExactlyOnceWith(
+      "get_google_access_token",
+      { account_id: "A" },
+    );
+  });
+
+  it("never falls back to another account after an active token fails", async () => {
+    localStorage.setItem("activeAccountId", "A");
+    mockInvoke.mockRejectedValue("invalid_grant");
+    await expect(getAccessToken()).rejects.toThrow("Gmail access expired");
+    expect(mockInvoke).toHaveBeenCalledExactlyOnceWith(
+      "get_google_access_token",
+      { account_id: "A" },
+    );
+  });
+});
+
+it("coalesces concurrent token refreshes per account without caching expired tokens", async () => {
+  let finish!: (value: string) => void;
+  mockInvoke.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const first = getAccessToken("A");
+  const second = getAccessToken("A");
+  expect(mockInvoke).toHaveBeenCalledTimes(1);
+  finish("token-A");
+  await expect(first).resolves.toBe("token-A");
+  await expect(second).resolves.toBe("token-A");
+  mockInvoke.mockResolvedValue("fresh-token-A");
+  await expect(getAccessToken("A")).resolves.toBe("fresh-token-A");
+  expect(mockInvoke).toHaveBeenCalledTimes(2);
 });

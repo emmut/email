@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Mail } from "@/components/mail/data";
 import { useAccount } from "@/context/AccountContext";
 import {
+  gmailAccountId,
   applyGmailActionToCache,
   applyGmailLabelChange,
   archiveMessage,
@@ -71,6 +72,7 @@ function countDelta(action: MailAction, folder: string, read: boolean): number {
 export function useMailActions(onRemoved?: (id: string) => void) {
   const queryClient = useQueryClient();
   const { activeAccount } = useAccount();
+  const accountId = activeAccount?.id ?? gmailAccountId();
 
   const mutation = useMutation({
     mutationFn: async ({ action, id }: { action: MailAction; id: string }) => {
@@ -121,37 +123,42 @@ export function useMailActions(onRemoved?: (id: string) => void) {
           // keep the optimistic UI — it replays when connectivity returns.
           // Permanent deletes are never queued: too destructive to replay.
           if (!isNetworkError(err) || action === "delete") throw err;
-          await queueIcloudAction(activeAccount.id, ref.folder, ref.uid, action);
+          await queueIcloudAction(
+            activeAccount.id,
+            ref.folder,
+            ref.uid,
+            action,
+          );
           return;
         }
       }
       try {
         switch (action) {
           case "archive":
-            await archiveMessage(id);
+            await archiveMessage(id, accountId);
             return;
           case "trash":
-            await trashMessage(id);
+            await trashMessage(id, accountId);
             return;
           case "read":
-            await markRead(id);
+            await markRead(id, accountId);
             return;
           case "unread":
-            await markUnread(id);
+            await markUnread(id, accountId);
             return;
           case "junk":
-            await junkMessage(id);
+            await junkMessage(id, accountId);
             return;
           case "notJunk":
-            await notJunkMessage(id);
+            await notJunkMessage(id, accountId);
             return;
           case "delete":
-            await deleteMessage(id);
+            await deleteMessage(id, accountId);
             return;
         }
       } catch (err) {
         if (!isNetworkError(err) || action === "delete") throw err;
-        await queueGmailAction(id, action);
+        await queueGmailAction(id, action, accountId);
       }
     },
     onMutate: async ({ action, id }) => {
@@ -183,13 +190,18 @@ export function useMailActions(onRemoved?: (id: string) => void) {
         };
       }
 
-      await queryClient.cancelQueries({ queryKey: ["gmail", "list"] });
-      await queryClient.cancelQueries({ queryKey: ["gmail", "counts"] });
+      await queryClient.cancelQueries({
+        queryKey: ["gmail", accountId, "list"],
+      });
+      await queryClient.cancelQueries({
+        queryKey: ["gmail", accountId, "counts"],
+      });
       const previous = queryClient.getQueriesData<Mail[]>({
-        queryKey: ["gmail", "list"],
+        queryKey: ["gmail", accountId, "list"],
       });
       const previousCounts = queryClient.getQueryData<Record<string, number>>([
         "gmail",
+        accountId,
         "counts",
       ]);
 
@@ -200,14 +212,14 @@ export function useMailActions(onRemoved?: (id: string) => void) {
       for (const [key, data] of previous) {
         const hit = data?.find((m) => m.id === id);
         if (hit) {
-          folder = key[2] as string;
+          folder = key[3] as string;
           mail = hit;
           break;
         }
       }
 
       queryClient.setQueriesData<Mail[]>(
-        { queryKey: ["gmail", "list"] },
+        { queryKey: ["gmail", accountId, "list"] },
         (old) =>
           action === "read" || action === "unread"
             ? old?.map((m) =>
@@ -221,7 +233,7 @@ export function useMailActions(onRemoved?: (id: string) => void) {
         const delta = countDelta(action, folder, mail.read);
         if (delta !== 0) {
           queryClient.setQueryData<Record<string, number>>(
-            ["gmail", "counts"],
+            ["gmail", accountId, "counts"],
             (old) =>
               old && folder in old
                 ? { ...old, [folder]: Math.max(0, old[folder] + delta) }
@@ -233,8 +245,8 @@ export function useMailActions(onRemoved?: (id: string) => void) {
       if (action !== "read" && action !== "unread") onRemoved?.(id);
       // Mirror the change into the local message store right away — durable
       // across restarts whether the server call succeeds now or replays later.
-      if (action === "delete") void removeGmailFromCache(id);
-      else void applyGmailActionToCache(id, action);
+      if (action === "delete") void removeGmailFromCache(id, accountId);
+      else void applyGmailActionToCache(id, action, accountId);
       return { previous, previousCounts, icloudPrevious: undefined };
     },
     onError: (_err, _vars, context) => {
@@ -245,7 +257,10 @@ export function useMailActions(onRemoved?: (id: string) => void) {
         queryClient.setQueryData(key, data),
       );
       if (context?.previousCounts) {
-        queryClient.setQueryData(["gmail", "counts"], context.previousCounts);
+        queryClient.setQueryData(
+          ["gmail", accountId, "counts"],
+          context.previousCounts,
+        );
       }
     },
     onSuccess: (_data, { action, id }) => {
@@ -264,11 +279,15 @@ export function useMailActions(onRemoved?: (id: string) => void) {
         }
         return;
       }
-      queryClient.invalidateQueries({ queryKey: ["gmail", "counts"] });
+      queryClient.invalidateQueries({
+        queryKey: ["gmail", accountId, "counts"],
+      });
       // Reconcile other folders (archive/trash destinations) in the background;
       // read/unread already left every list cache correct.
       if (action !== "read" && action !== "unread") {
-        queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
+        queryClient.invalidateQueries({
+          queryKey: ["gmail", accountId, "list"],
+        });
       }
     },
   });
@@ -353,21 +372,30 @@ function removeTagFromMail(mail: Mail, tag: Tag): Mail {
 // and reconcile with the server on success.
 export function useTagActions() {
   const queryClient = useQueryClient();
+  const { activeAccount } = useAccount();
+  const accountId = activeAccount?.id ?? gmailAccountId();
 
   const mutation = useMutation({
     mutationFn: ({ id, tag, on }: { id: string; tag: Tag; on: boolean }) =>
-      setMessageTag(id, tag.id, on),
+      setMessageTag(id, tag.id, on, accountId),
     onMutate: async ({ id, tag, on }) => {
-      void applyGmailLabelChange(id, on ? [tag.id] : [], on ? [] : [tag.id]);
-      await queryClient.cancelQueries({ queryKey: ["gmail", "list"] });
+      void applyGmailLabelChange(
+        id,
+        on ? [tag.id] : [],
+        on ? [] : [tag.id],
+        accountId,
+      );
+      await queryClient.cancelQueries({
+        queryKey: ["gmail", accountId, "list"],
+      });
       const previous = queryClient.getQueriesData<Mail[]>({
-        queryKey: ["gmail", "list"],
+        queryKey: ["gmail", accountId, "list"],
       });
       const apply = on ? addTagToMail : removeTagFromMail;
       for (const [key, mails] of previous) {
         if (!mails) continue;
         // Untagging while that tag's folder is open removes the mail from it.
-        if (!on && key[2] === tagFolderId(tag.id)) {
+        if (!on && key[3] === tagFolderId(tag.id)) {
           queryClient.setQueryData(
             key,
             mails.filter((m) => m.id !== id),
@@ -388,7 +416,7 @@ export function useTagActions() {
     },
     onSuccess: () => {
       // Reconcile tag folder lists (newly tagged mail appears there).
-      queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
+      queryClient.invalidateQueries({ queryKey: ["gmail", accountId, "list"] });
     },
   });
 
