@@ -39,7 +39,7 @@ jobs:
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       - name: Verify macOS update bundle
         run: |
-          lipo -verify_arch arm64 "$MACOS_BUNDLE_DIR/macos/Email.app/Contents/MacOS/email"
+          lipo "$MACOS_BUNDLE_DIR/macos/Email.app/Contents/MacOS/email" -verify_arch arm64
           bash scripts/verify-macos-update.sh "$MACOS_BUNDLE_DIR/macos/Email.app"
           shopt -s failglob
           dmgs=("$MACOS_BUNDLE_DIR"/dmg/*.dmg)

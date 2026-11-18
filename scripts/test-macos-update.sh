@@ -20,7 +20,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Exercise Apple Silicon signing even when CI is hosted on Intel.
 printf 'int main(void) { return 0; }\n' > "$TEST_DIR/main.c"
 xcrun clang -arch arm64 "$TEST_DIR/main.c" -o "$APP/Contents/MacOS/Email"
-lipo -verify_arch arm64 "$APP/Contents/MacOS/Email"
+lipo "$APP/Contents/MacOS/Email" -verify_arch arm64
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
