@@ -25,7 +25,7 @@ runs:
       run: |
         VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
         if [ "v${VERSION}" != "$RELEASE_TAG" ]; then
-          echo "::error::tauri.conf.json version ${VERSION} does not match ${RELEASE_TAG}; use scripts/release.sh or the Release workflow"
+          echo "::error::tauri.conf.json version ${VERSION} does not match ${RELEASE_TAG}; merge the version PR from the Prepare release workflow"
           exit 1
         fi
       if: inputs.release-tag != ''

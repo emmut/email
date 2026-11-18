@@ -181,15 +181,33 @@ to host files or the home directory.
 
 - `.github/workflows/ci.yml` runs on PRs and pushes to `main`: workflow linting,
   frontend tests, type checking, a frontend build, and Rust tests on one Linux
-  runner. PRs do not build native packages, use release secrets, or publish artifacts.
-- `.github/workflows/release.yml` runs for `v*` tag pushes and manual releases.
-  It calls separate reusable macOS, Linux (deb/rpm/AppImage/Flatpak), and Arch
-  build workflows with the same tag and inherited secrets. All builds share
-  `.github/actions/setup-build` for tools, caches, and dependency setup.
+  runner. PRs also validate Conventional Commit titles. They do not build native
+  packages, use release secrets, or publish artifacts.
+- **Prepare release** runs on pushes to `main` and can also be triggered
+  manually. Release Please opens or updates one PR with the next version and
+  changelog; it never pushes version changes directly to protected `main`.
+  Squash-merge PRs with Conventional Commit titles: `fix:` bumps patch, `feat:`
+  bumps minor, and `!` or `BREAKING CHANGE:` bumps major. Other types such as
+  `docs:` and `chore:` do not by themselves create a release. The current
+  `-alpha` suffix is retained until explicitly changed in a release PR.
+- Merging the release PR updates `package.json`, `tauri.conf.json`, `Cargo.toml`,
+  `Cargo.lock`, and the release manifest together. Release Please creates a tag
+  and draft release, then explicitly calls `.github/workflows/release.yml`
+  because tags created with `GITHUB_TOKEN` do not trigger another push workflow.
+- The release workflow calls separate reusable macOS, Linux
+  (deb/rpm/AppImage/Flatpak), and Arch builders with that tag and inherited
+  secrets. All builds share `.github/actions/setup-build` for tools, caches,
+  and dependency setup. Its manual trigger takes an **existing tag** to retry a
+  failed build without bumping the version again.
 - Releases stay in draft until every platform succeeds and the signed Sparkle
   appcast is uploaded. The release then becomes public and the Flatpak
   repository workflow signs and deploys the package repository to Pages. That
   workflow can also be run manually for an existing release tag.
+
+Repository settings must allow GitHub Actions to create pull requests
+(Settings → Actions → General → Workflow permissions). When GitHub requires
+approval to run CI on an automatically created release PR, approve those checks
+before merging. Branch protection remains in force for the version PR.
 
 ```bash
 pnpm install

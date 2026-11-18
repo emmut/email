@@ -3,7 +3,8 @@
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?$/;
+const SEMVER =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?$/;
 
 function parseSemver(version) {
   const match = SEMVER.exec(version);
@@ -56,21 +57,57 @@ export function assertNewerThanEveryVersion(candidate, currentVersions) {
   }
 }
 
+export function assertMatchingVersions(currentVersions) {
+  currentVersions.forEach(parseSemver);
+  if (new Set(currentVersions).size !== 1) {
+    throw new Error(
+      `release versions do not match: ${currentVersions.join(", ")}`,
+    );
+  }
+}
+
 function projectVersions() {
-  const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
+  const packageVersion = JSON.parse(
+    readFileSync("package.json", "utf8"),
+  ).version;
   const tauriVersion = JSON.parse(
     readFileSync("src-tauri/tauri.conf.json", "utf8"),
   ).version;
   const cargo = readFileSync("src-tauri/Cargo.toml", "utf8");
   const cargoVersion = cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
-  if (!cargoVersion) throw new Error("could not read package version from Cargo.toml");
-  return [packageVersion, tauriVersion, cargoVersion];
+  if (!cargoVersion)
+    throw new Error("could not read package version from Cargo.toml");
+  const lock = readFileSync("src-tauri/Cargo.lock", "utf8");
+  const lockVersion = lock.match(
+    /\[\[package\]\]\nname = "email"\nversion = "([^"]+)"/,
+  )?.[1];
+  if (!lockVersion)
+    throw new Error("could not read email version from Cargo.lock");
+  const releaseVersion = JSON.parse(
+    readFileSync(".release-please-manifest.json", "utf8"),
+  )["."];
+  return [
+    packageVersion,
+    tauriVersion,
+    cargoVersion,
+    lockVersion,
+    releaseVersion,
+  ];
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   const candidate = process.argv[2];
-  if (!candidate) throw new Error("usage: check-release-version.mjs <version>");
   const currentVersions = projectVersions();
-  assertNewerThanEveryVersion(candidate, currentVersions);
-  console.log(`${candidate} is newer than ${[...new Set(currentVersions)].join(", ")}`);
+  if (candidate) {
+    assertNewerThanEveryVersion(candidate, currentVersions);
+    console.log(
+      `${candidate} is newer than ${[...new Set(currentVersions)].join(", ")}`,
+    );
+  } else {
+    assertMatchingVersions(currentVersions);
+    console.log(`All release versions match ${currentVersions[0]}`);
+  }
 }
