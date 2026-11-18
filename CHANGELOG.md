@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6-alpha](https://github.com/emmut/email/compare/v0.1.5-alpha...v0.1.6-alpha) (2026-11-18)
+
+
+### Bug Fixes
+
+* retain and verify signed macOS release bundles ([#37](https://github.com/emmut/email/issues/37)) ([4251c88](https://github.com/emmut/email/commit/4251c88d0bd0c064d46f1ba4ff185d6996e90cb3))
+
 ## [0.1.5-alpha](https://github.com/emmut/email/compare/v0.1.4-alpha...v0.1.5-alpha) (2026-11-18)
 
 
