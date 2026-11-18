@@ -9,6 +9,10 @@ if [ "$#" -ne 1 ]; then
 fi
 
 APP="$1"
+if [ ! -d "$APP" ]; then
+  echo "App bundle does not exist: $APP; retain it with 'tauri build --bundles app,dmg'." >&2
+  exit 1
+fi
 if [ ! -s "$APP/Contents/_CodeSignature/CodeResources" ]; then
   echo "Missing bundle resource signature: $APP; build with a macOS signing identity (ad-hoc '-' is supported)." >&2
   exit 1

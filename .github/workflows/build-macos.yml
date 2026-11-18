@@ -27,12 +27,21 @@ jobs:
         with:
           release-tag: ${{ inputs.tag }}
       - name: Build signed macOS app and DMG
-        run: pnpm tauri build --bundles dmg
+        # A dmg-only build deletes the intermediate .app before verification.
+        run: pnpm tauri build --bundles app,dmg
         env:
           GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       - name: Verify macOS update bundle
-        run: bash scripts/verify-macos-update.sh src-tauri/target/release/bundle/macos/Email.app
+        run: |
+          bash scripts/verify-macos-update.sh src-tauri/target/release/bundle/macos/Email.app
+          shopt -s failglob
+          dmgs=(src-tauri/target/release/bundle/dmg/*.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one macOS update DMG"
+            exit 1
+          fi
+          bash scripts/verify-macos-dmg.sh "${dmgs[0]}"
       - name: Reject a tampered update bundle
         run: |
           ditto src-tauri/target/release/bundle/macos/Email.app "$RUNNER_TEMP/Tampered.app"
