@@ -79,7 +79,7 @@ jobs:
           # Fresh db each release: only the newest version is installable via
           # pacman; older packages stay attached to arch-repo for manual
           # downgrades.
-          repo-add email.db.tar.gz *.pkg.tar.zst
+          repo-add email.db.tar.gz ./*.pkg.tar.zst
           # pacman fetches plain email.db / email.files; repo-add only leaves
           # symlinks with those names, and symlinks don't survive the upload
           cp --remove-destination email.db.tar.gz email.db
@@ -89,4 +89,4 @@ jobs:
               --title "Arch package repository" \
               --notes "Rolling pacman repository, updated by CI on every release. See the README's Updates section for pacman.conf setup."
           fi
-          gh release upload arch-repo *.pkg.tar.zst email.db email.files --clobber
+          gh release upload arch-repo ./*.pkg.tar.zst email.db email.files --clobber
