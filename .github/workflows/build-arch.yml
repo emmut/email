@@ -14,7 +14,7 @@ permissions:
   contents: write
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: archlinux:base-devel
     # Container run steps otherwise default to sh; packaging uses Bash arrays
     # and substitutions just like the other platform workflows.

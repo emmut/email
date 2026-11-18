@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       issues: write
@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: Prepare version and changelog PR
         id: release
-        uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4, Release Please 17.3.0
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0, Node 24
         with:
           target-branch: main
           config-file: release-please-config.json
