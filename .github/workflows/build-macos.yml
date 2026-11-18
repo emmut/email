@@ -16,7 +16,8 @@ permissions:
   contents: write
 jobs:
   build:
-    runs-on: macos-latest
+    # Keep the Apple Silicon build on a fixed image instead of the latest migration.
+    runs-on: macos-15
     env:
       RELEASE_TAG: ${{ inputs.tag }}
     steps:

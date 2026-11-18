@@ -13,7 +13,8 @@ permissions:
 
 jobs:
   verify:
-    runs-on: macos-latest
+    # Keep the Apple Silicon build on a fixed image instead of the latest migration.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
       # A small signed fixture tests codesign and DMG verification; no Rust build.
