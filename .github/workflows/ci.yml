@@ -20,7 +20,7 @@ jobs:
       - name: Validate synchronized release versions
         run: node scripts/check-release-version.mjs
       - name: Validate GitHub Actions workflows
-        uses: docker://rhysd/actionlint:1.7.7
+        uses: docker://rhysd/actionlint:1.7.12
       - uses: ./.github/actions/setup-build
       - name: Frontend tests
         run: pnpm test
