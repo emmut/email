@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7-alpha](https://github.com/emmut/email/compare/v0.1.6-alpha...v0.1.7-alpha) (2026-11-18)
+
+
+### Bug Fixes
+
+* use macOS 26 Intel runners for Apple Silicon releases ([#40](https://github.com/emmut/email/issues/40)) ([6c8dec5](https://github.com/emmut/email/commit/6c8dec52f0b83c8bc162cedd4bd06239427b54d9))
+
 ## [0.1.6-alpha](https://github.com/emmut/email/compare/v0.1.5-alpha...v0.1.6-alpha) (2026-11-18)
 
 
