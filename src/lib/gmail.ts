@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import DOMPurify from "dompurify";
 import { invoke } from "@tauri-apps/api/core";
 import { fetch } from "@tauri-apps/plugin-http";
@@ -11,24 +11,33 @@ import type { Mail } from "@/components/mail/data";
 
 // Gmail cache account id: prefer active account when set, fall back to legacy
 const GMAIL_CACHE_LEGACY = "legacy";
-function gmailCacheAccount() {
+export function gmailAccountId() {
   return localStorage.getItem("activeAccountId") ?? GMAIL_CACHE_LEGACY;
 }
 
-export function clearGmailCache() {
+export function clearGmailCache(accountId = gmailAccountId()) {
   lastFolderSync.clear();
   prefetchedBodies.clear();
+  labelNamesPromises.clear();
+  knownLabelNames.clear();
+  historyIds.clear();
   return Promise.all([
     cacheDeletePrefix("gmail:"),
-    invoke("gmail_cache_clear", { account_id: gmailCacheAccount() }).catch(() => {}),
+    invoke("gmail_cache_clear", { account_id: accountId }).catch(() => {}),
   ]);
 }
 
 const BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 const PEOPLE_BASE = "https://people.googleapis.com/v1";
 
-async function google<T>(url: string, init?: RequestInit): Promise<T> {
-  const token = await getAccessToken();
+async function google<T>(
+  url: string,
+  init?: RequestInit,
+  accountId = gmailAccountId(),
+): Promise<T> {
+  const token = await getAccessToken(
+    accountId === GMAIL_CACHE_LEGACY ? null : accountId,
+  );
   const res = await fetch(url, {
     ...init,
     headers: {
@@ -44,8 +53,12 @@ async function google<T>(url: string, init?: RequestInit): Promise<T> {
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
-function gmail<T>(path: string, init?: RequestInit): Promise<T> {
-  return google<T>(`${BASE}${path}`, init);
+function gmail<T>(
+  path: string,
+  init?: RequestInit,
+  accountId = gmailAccountId(),
+): Promise<T> {
+  return google<T>(`${BASE}${path}`, init, accountId);
 }
 
 // --- API response shapes (only the fields we read) ---
@@ -229,38 +242,53 @@ function toMail(msg: Message, labelNames: Map<string, string>): Mail {
 
 // --- queries ---
 
-export const profileQuery = queryOptions({
-  queryKey: ["gmail", "profile"],
-  queryFn: () => gmail<Profile>("/profile"),
-  staleTime: Infinity,
-});
+export function profileQuery(accountId = gmailAccountId()) {
+  return queryOptions({
+    queryKey: ["gmail", accountId, "profile"],
+    queryFn: () => gmail<Profile>("/profile", undefined, accountId),
+    staleTime: Infinity,
+  });
+}
 
 // Signed-in account's profile photo URL (null if none or not permitted).
-export const avatarQuery = queryOptions({
-  queryKey: ["gmail", "avatar"],
-  queryFn: async (): Promise<string | null> => {
-    const res = await google<{
-      photos?: { url?: string; metadata?: { primary?: boolean } }[];
-    }>(`${PEOPLE_BASE}/people/me?personFields=photos`);
-    const photo =
-      res.photos?.find((p) => p.metadata?.primary) ?? res.photos?.[0];
-    return photo?.url ?? null;
-  },
-  staleTime: Infinity,
-  retry: false, // 403 when the granted scopes don't cover profile photos
-});
+export function avatarQuery(accountId = gmailAccountId()) {
+  return queryOptions({
+    queryKey: ["gmail", accountId, "avatar"],
+    queryFn: async (): Promise<string | null> => {
+      const res = await google<{
+        photos?: { url?: string; metadata?: { primary?: boolean } }[];
+      }>(`${PEOPLE_BASE}/people/me?personFields=photos`, undefined, accountId);
+      const photo =
+        res.photos?.find((p) => p.metadata?.primary) ?? res.photos?.[0];
+      return photo?.url ?? null;
+    },
+    staleTime: Infinity,
+    retry: false, // 403 when the granted scopes don't cover profile photos
+  });
+}
 
 // Label id → display name, fetched once per session (user labels rarely change;
 // the map is only used for badge text).
-let labelNamesPromise: Promise<Map<string, string>> | null = null;
-function labelNames(): Promise<Map<string, string>> {
-  labelNamesPromise ??= gmail<{ labels: Label[] }>("/labels")
-    .then((res) => new Map(res.labels.map((l) => [l.id, l.name])))
-    .catch((err) => {
-      labelNamesPromise = null;
-      throw err;
-    });
-  return labelNamesPromise;
+const labelNamesPromises = new Map<string, Promise<Map<string, string>>>();
+const knownLabelNames = new Map<string, Map<string, string>>();
+function labelNames(
+  accountId = gmailAccountId(),
+): Promise<Map<string, string>> {
+  let pending = labelNamesPromises.get(accountId);
+  if (!pending) {
+    pending = gmail<{ labels: Label[] }>("/labels", undefined, accountId)
+      .then((res) => {
+        const names = new Map(res.labels.map((l) => [l.id, l.name]));
+        knownLabelNames.set(accountId, names);
+        return names;
+      })
+      .catch((err) => {
+        labelNamesPromises.delete(accountId);
+        throw err;
+      });
+    labelNamesPromises.set(accountId, pending);
+  }
+  return pending;
 }
 
 // --- tags (Gmail user labels) ---
@@ -270,43 +298,66 @@ export interface Tag {
   name: string;
 }
 
-export const tagsQuery = queryOptions({
-  queryKey: ["gmail", "tags"],
-  queryFn: async (): Promise<Tag[]> => {
-    const res = await gmail<{ labels: Label[] }>("/labels");
-    return res.labels
-      .filter((l) => l.type === "user")
-      .map((l) => ({ id: l.id, name: l.name }))
-      .sort((a, b) => compareNames(a.name, b.name));
-  },
-  staleTime: 5 * 60_000,
-});
-
-export async function createTag(name: string): Promise<Tag> {
-  const label = await gmail<Label>("/labels", {
-    method: "POST",
-    body: JSON.stringify({
-      name,
-      labelListVisibility: "labelShow",
-      messageListVisibility: "show",
-    }),
+export function tagsQuery(accountId = gmailAccountId()) {
+  return queryOptions({
+    queryKey: ["gmail", accountId, "tags"],
+    queryFn: async (): Promise<Tag[]> => {
+      const res = await gmail<{ labels: Label[] }>(
+        "/labels",
+        undefined,
+        accountId,
+      );
+      return res.labels
+        .filter((l) => l.type === "user")
+        .map((l) => ({ id: l.id, name: l.name }))
+        .sort((a, b) => compareNames(a.name, b.name));
+    },
+    staleTime: 5 * 60_000,
   });
+}
+
+export async function createTag(
+  name: string,
+  accountId = gmailAccountId(),
+): Promise<Tag> {
+  const label = await gmail<Label>(
+    "/labels",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        labelListVisibility: "labelShow",
+        messageListVisibility: "show",
+      }),
+    },
+    accountId,
+  );
   // Keep the id → name map current so new tags render by name immediately.
-  (await labelNames()).set(label.id, label.name);
+  (await labelNames(accountId)).set(label.id, label.name);
   return { id: label.id, name: label.name };
 }
 
 // Deletes the label everywhere; Gmail removes it from all messages.
-export function deleteTag(tagId: string) {
-  return gmail<void>(`/labels/${encodeURIComponent(tagId)}`, {
-    method: "DELETE",
-  });
+export function deleteTag(tagId: string, accountId = gmailAccountId()) {
+  return gmail<void>(
+    `/labels/${encodeURIComponent(tagId)}`,
+    {
+      method: "DELETE",
+    },
+    accountId,
+  );
 }
 
-export function setMessageTag(id: string, tagId: string, on: boolean) {
+export function setMessageTag(
+  id: string,
+  tagId: string,
+  on: boolean,
+  accountId = gmailAccountId(),
+) {
   return modifyMessage(
     id,
     on ? { addLabelIds: [tagId] } : { removeLabelIds: [tagId] },
+    accountId,
   );
 }
 
@@ -338,18 +389,25 @@ function folderParams(folder: string): string {
     : (FOLDER_PARAMS[folder] ?? FOLDER_PARAMS.inbox);
 }
 
-async function fetchMailsFromNetwork(params: string): Promise<Mail[]> {
+async function fetchMailsFromNetwork(
+  params: string,
+  accountId = gmailAccountId(),
+): Promise<Mail[]> {
   const list = await gmail<{ messages?: MessageRef[] }>(
     `/messages?maxResults=50&${params}`,
+    undefined,
+    accountId,
   );
   if (!list.messages?.length) return [];
   const [names, messages] = await Promise.all([
-    labelNames(),
+    labelNames(accountId),
     Promise.all(
       list.messages.map((m) =>
         gmail<Message>(
           `/messages/${m.id}?format=metadata` +
             `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+          undefined,
+          accountId,
         ),
       ),
     ),
@@ -400,14 +458,14 @@ function mailToRow(m: Mail): GmailCachedMessage {
   };
 }
 
-async function rowsToMails(rows: GmailCachedMessage[]): Promise<Mail[]> {
+async function rowsToMails(
+  rows: GmailCachedMessage[],
+  accountId = gmailAccountId(),
+): Promise<Mail[]> {
   const isUserLabel = (id: string) =>
     !SYSTEM_LABELS.has(id) && !id.startsWith("CATEGORY_");
-  // Badge names need the label map; offline it may be unavailable — fall back
-  // to raw ids rather than failing the listing.
-  const names = rows.some((r) => r.label_ids.some(isUserLabel))
-    ? await labelNames().catch(() => new Map<string, string>())
-    : new Map<string, string>();
+  // Local reads must never wait for the network just to resolve a badge.
+  const names = knownLabelNames.get(accountId) ?? new Map<string, string>();
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
@@ -423,13 +481,16 @@ async function rowsToMails(rows: GmailCachedMessage[]): Promise<Mail[]> {
   }));
 }
 
-async function readGmailFolder(folder: string): Promise<Mail[]> {
+async function readGmailFolder(
+  folder: string,
+  accountId = gmailAccountId(),
+): Promise<Mail[]> {
   const rows = await invoke<GmailCachedMessage[]>("gmail_cache_list", {
-    account_id: gmailCacheAccount(),
+    account_id: accountId,
     label_id: folderLabelId(folder),
     limit: 50,
   });
-  return rowsToMails(rows);
+  return rowsToMails(rows, accountId);
 }
 
 // Full folder syncs are expensive (1 list + 50 metadata requests). Between
@@ -438,23 +499,28 @@ async function readGmailFolder(folder: string): Promise<Mail[]> {
 const FULL_SYNC_INTERVAL = 5 * 60_000;
 const lastFolderSync = new Map<string, number>();
 
-async function syncGmailFolder(folder: string): Promise<void> {
-  const mails = await fetchMailsFromNetwork(folderParams(folder));
+async function syncGmailFolder(
+  folder: string,
+  accountId = gmailAccountId(),
+): Promise<void> {
+  const mails = await fetchMailsFromNetwork(folderParams(folder), accountId);
   await invoke("gmail_cache_replace_folder", {
-    account_id: gmailCacheAccount(),
+    account_id: accountId,
     label_id: folderLabelId(folder),
     messages: mails.map(mailToRow),
   });
-  lastFolderSync.set(folder, Date.now());
+  lastFolderSync.set(`${accountId}:${folder}`, Date.now());
   // Fire-and-forget: warm the body cache for the newest messages so they're
   // readable offline without ever having been opened.
-  void prefetchBodies(mails.slice(0, 10));
+  void prefetchBodies(mails.slice(0, 10), accountId);
 }
 
 // Called when the historyId reseeds (expired/invalid) — the deltas we missed
 // are unknown, so folders must fully resync on next view.
-function invalidateFolderSyncState() {
-  lastFolderSync.clear();
+function invalidateFolderSyncState(accountId = gmailAccountId()) {
+  for (const key of lastFolderSync.keys()) {
+    if (key.startsWith(`${accountId}:`)) lastFolderSync.delete(key);
+  }
 }
 
 // Label ops mirroring the server-side mail actions, applied to the local
@@ -472,9 +538,10 @@ export function applyGmailLabelChange(
   id: string,
   add: string[],
   remove: string[],
+  accountId = gmailAccountId(),
 ) {
   return invoke("gmail_cache_modify_labels", {
-    account_id: gmailCacheAccount(),
+    account_id: accountId,
     message_id: id,
     add,
     remove,
@@ -484,22 +551,27 @@ export function applyGmailLabelChange(
 export function applyGmailActionToCache(
   id: string,
   action: "read" | "unread" | "archive" | "trash" | "junk" | "notJunk",
+  accountId = gmailAccountId(),
 ) {
   const ops = ACTION_LABEL_OPS[action];
-  return applyGmailLabelChange(id, ops.add, ops.remove);
+  return applyGmailLabelChange(id, ops.add, ops.remove, accountId);
 }
 
 // Drop a permanently deleted message from the local store.
-export function removeGmailFromCache(id: string) {
+export function removeGmailFromCache(id: string, accountId = gmailAccountId()) {
   return invoke("gmail_cache_delete", {
-    account_id: gmailCacheAccount(),
+    account_id: accountId,
     ids: [id],
   });
 }
 
-export function mailListQuery(folder: string, search: string) {
+export function mailListQuery(
+  folder: string,
+  search: string,
+  accountId = gmailAccountId(),
+) {
   return queryOptions({
-    queryKey: ["gmail", "list", folder, search],
+    queryKey: ["gmail", accountId, "list", folder, search],
     queryFn: async (): Promise<Mail[]> => {
       // Ad-hoc searches go straight to the server, uncached.
       if (search) {
@@ -510,19 +582,22 @@ export function mailListQuery(folder: string, search: string) {
         params = params.startsWith("q=")
           ? `q=${encodeURIComponent(q)}`
           : `${params}&q=${encodeURIComponent(q)}`;
-        return fetchMailsFromNetwork(params);
+        return fetchMailsFromNetwork(params, accountId);
       }
       // Local-first: full-sync at most every FULL_SYNC_INTERVAL (history
       // deltas cover the gaps), then serve the listing from SQLite.
       let syncError: unknown = null;
-      if (Date.now() - (lastFolderSync.get(folder) ?? 0) > FULL_SYNC_INTERVAL) {
+      if (
+        Date.now() - (lastFolderSync.get(`${accountId}:${folder}`) ?? 0) >
+        FULL_SYNC_INTERVAL
+      ) {
         try {
-          await syncGmailFolder(folder);
+          await syncGmailFolder(folder, accountId);
         } catch (err) {
           syncError = err;
         }
       }
-      const mails = await readGmailFolder(folder);
+      const mails = await readGmailFolder(folder, accountId);
       if (syncError !== null && mails.length === 0) {
         throw syncError instanceof Error
           ? syncError
@@ -538,14 +613,14 @@ export function mailListQuery(folder: string, search: string) {
 // answer for an already-cached body never changes.
 const prefetchedBodies = new Set<string>();
 
-async function prefetchBodies(mails: Mail[]) {
+async function prefetchBodies(mails: Mail[], accountId = gmailAccountId()) {
   for (const mail of mails) {
-    if (prefetchedBodies.has(mail.id)) continue;
+    if (prefetchedBodies.has(`${accountId}:${mail.id}`)) continue;
     try {
-      if (!(await cacheGet<MailBody>(`gmail:body:${mail.id}`))) {
-        await fetchMailBody(mail.id); // caches as a side effect
+      if (!(await cacheGet<MailBody>(`gmail:${accountId}:body:${mail.id}`))) {
+        await fetchMailBody(mail.id, accountId); // caches as a side effect
       }
-      prefetchedBodies.add(mail.id);
+      prefetchedBodies.add(`${accountId}:${mail.id}`);
     } catch {
       return; // network gone — stop quietly
     }
@@ -554,20 +629,30 @@ async function prefetchBodies(mails: Mail[]) {
 
 // Local-store-only folder listing — instant, no network. Painted while the
 // syncing query above is in flight.
-export function gmailCachedListQuery(folder: string) {
+export function gmailCachedListQuery(
+  folder: string,
+  accountId = gmailAccountId(),
+) {
   return queryOptions({
-    queryKey: ["gmail", "list", folder, "@cache"],
-    queryFn: () => readGmailFolder(folder),
+    queryKey: ["gmail", accountId, "list", folder, "@cache"],
+    queryFn: () => readGmailFolder(folder, accountId),
     staleTime: Infinity,
   });
 }
 
 // Bodies are immutable — serve from the local cache when present, and cache
 // on first fetch (also used by the list prefetcher).
-async function fetchMailBody(id: string): Promise<MailBody> {
-  const cached = await cacheGet<MailBody>(`gmail:body:${id}`);
+async function fetchMailBody(
+  id: string,
+  accountId = gmailAccountId(),
+): Promise<MailBody> {
+  const cached = await cacheGet<MailBody>(`gmail:${accountId}:body:${id}`);
   if (cached) return cached;
-  const msg = await gmail<Message>(`/messages/${id}?format=full`);
+  const msg = await gmail<Message>(
+    `/messages/${id}?format=full`,
+    undefined,
+    accountId,
+  );
   const from = header(msg, "From");
   const body: MailBody = {
     ...extractBody(msg.payload),
@@ -581,44 +666,48 @@ async function fetchMailBody(id: string): Promise<MailBody> {
     references: header(msg, "References"),
     date: header(msg, "Date"),
   };
-  cachePut(`gmail:body:${id}`, body);
+  cachePut(`gmail:${accountId}:body:${id}`, body);
   return body;
 }
 
-export function mailBodyQuery(id: string) {
+export function mailBodyQuery(id: string, accountId = gmailAccountId()) {
   return queryOptions({
-    queryKey: ["gmail", "message", id],
-    queryFn: () => fetchMailBody(id),
+    queryKey: ["gmail", accountId, "message", id],
+    queryFn: () => fetchMailBody(id, accountId),
     staleTime: Infinity,
   });
 }
 
 // Sidebar badge counts, keyed by folder id.
-export const folderCountsQuery = queryOptions({
-  queryKey: ["gmail", "counts"],
-  queryFn: async (): Promise<Record<string, number>> => {
-    try {
-      const [inbox, drafts, junk] = await Promise.all([
-        gmail<Label>("/labels/INBOX"),
-        gmail<Label>("/labels/DRAFT"),
-        gmail<Label>("/labels/SPAM"),
-      ]);
-      const counts = {
-        inbox: inbox.messagesUnread ?? 0,
-        drafts: drafts.messagesTotal ?? 0,
-        junk: junk.messagesUnread ?? 0,
-      };
-      cachePut("gmail:counts", counts);
-      return counts;
-    } catch (err) {
-      // Offline — fall back to the last known counts.
-      const cached = await cacheGet<Record<string, number>>("gmail:counts");
-      if (cached) return cached;
-      throw err;
-    }
-  },
-  staleTime: 30_000,
-});
+export function folderCountsQuery(accountId = gmailAccountId()) {
+  return queryOptions({
+    queryKey: ["gmail", accountId, "counts"],
+    queryFn: async (): Promise<Record<string, number>> => {
+      try {
+        const [inbox, drafts, junk] = await Promise.all([
+          gmail<Label>("/labels/INBOX", undefined, accountId),
+          gmail<Label>("/labels/DRAFT", undefined, accountId),
+          gmail<Label>("/labels/SPAM", undefined, accountId),
+        ]);
+        const counts = {
+          inbox: inbox.messagesUnread ?? 0,
+          drafts: drafts.messagesTotal ?? 0,
+          junk: junk.messagesUnread ?? 0,
+        };
+        cachePut(`gmail:${accountId}:counts`, counts);
+        return counts;
+      } catch (err) {
+        // Offline — fall back to the last known counts.
+        const cached = await cacheGet<Record<string, number>>(
+          `gmail:${accountId}:counts`,
+        );
+        if (cached) return cached;
+        throw err;
+      }
+    },
+    staleTime: 30_000,
+  });
+}
 
 // --- server-side filters (settings.filters) ---
 //
@@ -647,23 +736,35 @@ function withFilterScopeHint(err: unknown): Error {
 export async function createGmailFilter(
   criteria: { from?: string; to?: string; subject?: string },
   labelId: string,
+  accountId = gmailAccountId(),
 ): Promise<string> {
   try {
-    const filter = await gmail<GmailFilter>("/settings/filters", {
-      method: "POST",
-      body: JSON.stringify({ criteria, action: { addLabelIds: [labelId] } }),
-    });
+    const filter = await gmail<GmailFilter>(
+      "/settings/filters",
+      {
+        method: "POST",
+        body: JSON.stringify({ criteria, action: { addLabelIds: [labelId] } }),
+      },
+      accountId,
+    );
     return filter.id;
   } catch (err) {
     throw withFilterScopeHint(err);
   }
 }
 
-export async function deleteGmailFilter(id: string): Promise<void> {
+export async function deleteGmailFilter(
+  id: string,
+  accountId = gmailAccountId(),
+): Promise<void> {
   try {
-    await gmail<void>(`/settings/filters/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    });
+    await gmail<void>(
+      `/settings/filters/${encodeURIComponent(id)}`,
+      {
+        method: "DELETE",
+      },
+      accountId,
+    );
   } catch (err) {
     // Already gone server-side (deleted from the Gmail UI) — nothing to do.
     const msg = err instanceof Error ? err.message : String(err);
@@ -682,18 +783,24 @@ interface SendAs {
 }
 
 // Default send-as identity's signature, as Gmail-hosted HTML ("" if none).
-export const signatureQuery = queryOptions({
-  queryKey: ["gmail", "signature"],
-  queryFn: async () => {
-    const res = await gmail<{ sendAs?: SendAs[] }>("/settings/sendAs");
-    const identity =
-      res.sendAs?.find((s) => s.isDefault) ??
-      res.sendAs?.find((s) => s.isPrimary) ??
-      res.sendAs?.[0];
-    return identity?.signature ?? "";
-  },
-  staleTime: Infinity,
-});
+export function signatureQuery(accountId = gmailAccountId()) {
+  return queryOptions({
+    queryKey: ["gmail", accountId, "signature"],
+    queryFn: async () => {
+      const res = await gmail<{ sendAs?: SendAs[] }>(
+        "/settings/sendAs",
+        undefined,
+        accountId,
+      );
+      const identity =
+        res.sendAs?.find((s) => s.isDefault) ??
+        res.sendAs?.find((s) => s.isPrimary) ??
+        res.sendAs?.[0];
+      return identity?.signature ?? "";
+    },
+    staleTime: Infinity,
+  });
+}
 
 // --- contacts (People API) ---
 
@@ -720,27 +827,36 @@ function toContacts(people: Person[] | undefined): Contact[] {
 
 // Saved contacts + "other contacts" (the interaction-derived pool Gmail's own
 // autocomplete uses), deduped by address.
-export const contactsQuery = queryOptions({
-  queryKey: ["gmail", "contacts"],
-  queryFn: async (): Promise<Contact[]> => {
-    const [saved, other] = await Promise.all([
-      google<{ connections?: Person[] }>(
-        `${PEOPLE_BASE}/people/me/connections?personFields=names,emailAddresses&pageSize=1000`,
-      ),
-      google<{ otherContacts?: Person[] }>(
-        `${PEOPLE_BASE}/otherContacts?readMask=names,emailAddresses&pageSize=1000`,
-      ),
-    ]);
-    const byEmail = new Map<string, Contact>();
-    for (const c of [...toContacts(saved.connections), ...toContacts(other.otherContacts)]) {
-      const key = c.email.toLowerCase();
-      const existing = byEmail.get(key);
-      if (!existing || (!existing.name && c.name)) byEmail.set(key, c);
-    }
-    return [...byEmail.values()];
-  },
-  staleTime: 10 * 60_000,
-});
+export function contactsQuery(accountId = gmailAccountId()) {
+  return queryOptions({
+    queryKey: ["gmail", accountId, "contacts"],
+    queryFn: async (): Promise<Contact[]> => {
+      const [saved, other] = await Promise.all([
+        google<{ connections?: Person[] }>(
+          `${PEOPLE_BASE}/people/me/connections?personFields=names,emailAddresses&pageSize=1000`,
+          undefined,
+          accountId,
+        ),
+        google<{ otherContacts?: Person[] }>(
+          `${PEOPLE_BASE}/otherContacts?readMask=names,emailAddresses&pageSize=1000`,
+          undefined,
+          accountId,
+        ),
+      ]);
+      const byEmail = new Map<string, Contact>();
+      for (const c of [
+        ...toContacts(saved.connections),
+        ...toContacts(other.otherContacts),
+      ]) {
+        const key = c.email.toLowerCase();
+        const existing = byEmail.get(key);
+        if (!existing || (!existing.name && c.name)) byEmail.set(key, c);
+      }
+      return [...byEmail.values()];
+    },
+    staleTime: 10 * 60_000,
+  });
+}
 
 // --- mutations ---
 
@@ -768,31 +884,46 @@ function withModifyHint(err: unknown): Error {
 function modifyMessage(
   id: string,
   labels: { addLabelIds?: string[]; removeLabelIds?: string[] },
+  accountId = gmailAccountId(),
 ) {
-  return gmail<Message>(`/messages/${id}/modify`, {
-    method: "POST",
-    body: JSON.stringify(labels),
-  }).catch(withModifyHint);
+  return gmail<Message>(
+    `/messages/${id}/modify`,
+    {
+      method: "POST",
+      body: JSON.stringify(labels),
+    },
+    accountId,
+  ).catch(withModifyHint);
 }
 
-export function archiveMessage(id: string) {
-  return modifyMessage(id, { removeLabelIds: ["INBOX"] });
+export function archiveMessage(id: string, accountId = gmailAccountId()) {
+  return modifyMessage(id, { removeLabelIds: ["INBOX"] }, accountId);
 }
 
 // Gmail's spam verdict is the SPAM system label — the same modify call the
 // web UI's "Report spam"/"Not spam" buttons make.
-export function junkMessage(id: string) {
-  return modifyMessage(id, { addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] });
-}
-
-export function notJunkMessage(id: string) {
-  return modifyMessage(id, { addLabelIds: ["INBOX"], removeLabelIds: ["SPAM"] });
-}
-
-export function trashMessage(id: string) {
-  return gmail<Message>(`/messages/${id}/trash`, { method: "POST" }).catch(
-    withModifyHint,
+export function junkMessage(id: string, accountId = gmailAccountId()) {
+  return modifyMessage(
+    id,
+    { addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] },
+    accountId,
   );
+}
+
+export function notJunkMessage(id: string, accountId = gmailAccountId()) {
+  return modifyMessage(
+    id,
+    { addLabelIds: ["INBOX"], removeLabelIds: ["SPAM"] },
+    accountId,
+  );
+}
+
+export function trashMessage(id: string, accountId = gmailAccountId()) {
+  return gmail<Message>(
+    `/messages/${id}/trash`,
+    { method: "POST" },
+    accountId,
+  ).catch(withModifyHint);
 }
 
 // Accounts authorized before the full-mail scope was adopted hold tokens that
@@ -812,39 +943,45 @@ function withScopeHint(err: unknown): Error {
 }
 
 // Permanent removal — needs the full mail scope, not gmail.modify.
-export async function deleteMessage(id: string) {
+export async function deleteMessage(id: string, accountId = gmailAccountId()) {
   try {
-    await gmail<void>(`/messages/${id}`, { method: "DELETE" });
+    await gmail<void>(`/messages/${id}`, { method: "DELETE" }, accountId);
   } catch (err) {
     throw withScopeHint(err);
   }
 }
 
-export async function emptyTrash() {
+export async function emptyTrash(accountId = gmailAccountId()) {
   try {
     // batchDelete caps at 1000 ids; page until the trash listing runs dry.
     for (;;) {
       const page = await gmail<{ messages?: MessageRef[] }>(
         "/messages?labelIds=TRASH&maxResults=500",
+        undefined,
+        accountId,
       );
       const ids = (page.messages ?? []).map((m) => m.id);
       if (!ids.length) return;
-      await gmail<void>("/messages/batchDelete", {
-        method: "POST",
-        body: JSON.stringify({ ids }),
-      });
+      await gmail<void>(
+        "/messages/batchDelete",
+        {
+          method: "POST",
+          body: JSON.stringify({ ids }),
+        },
+        accountId,
+      );
     }
   } catch (err) {
     throw withScopeHint(err);
   }
 }
 
-export function markRead(id: string) {
-  return modifyMessage(id, { removeLabelIds: ["UNREAD"] });
+export function markRead(id: string, accountId = gmailAccountId()) {
+  return modifyMessage(id, { removeLabelIds: ["UNREAD"] }, accountId);
 }
 
-export function markUnread(id: string) {
-  return modifyMessage(id, { addLabelIds: ["UNREAD"] });
+export function markUnread(id: string, accountId = gmailAccountId()) {
+  return modifyMessage(id, { addLabelIds: ["UNREAD"] }, accountId);
 }
 
 // --- sending ---
@@ -945,27 +1082,41 @@ function toBase64Url(rfc822: string): string {
     .replace(/=+$/, "");
 }
 
-export async function sendMessage(msg: OutgoingMail) {
+export async function sendMessage(
+  msg: OutgoingMail,
+  accountId = gmailAccountId(),
+) {
   const raw = toBase64Url(buildRfc822(msg));
-  const sent = await gmail<Message>("/messages/send", {
-    method: "POST",
-    body: JSON.stringify({ raw, ...(msg.threadId ? { threadId: msg.threadId } : {}) }),
-  });
+  const sent = await gmail<Message>(
+    "/messages/send",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        raw,
+        ...(msg.threadId ? { threadId: msg.threadId } : {}),
+      }),
+    },
+    accountId,
+  );
   if (msg.labelIds?.length) {
-    await modifyMessage(sent.id, { addLabelIds: msg.labelIds });
+    await modifyMessage(sent.id, { addLabelIds: msg.labelIds }, accountId);
   }
   return sent;
 }
 
 // Save an unsent message into Gmail's Drafts.
-export function saveDraft(msg: OutgoingMail) {
+export function saveDraft(msg: OutgoingMail, accountId = gmailAccountId()) {
   const raw = toBase64Url(buildRfc822(msg));
-  return gmail<{ id: string }>("/drafts", {
-    method: "POST",
-    body: JSON.stringify({
-      message: { raw, ...(msg.threadId ? { threadId: msg.threadId } : {}) },
-    }),
-  });
+  return gmail<{ id: string }>(
+    "/drafts",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        message: { raw, ...(msg.threadId ? { threadId: msg.threadId } : {}) },
+      }),
+    },
+    accountId,
+  );
 }
 
 // --- historyId delta sync ---
@@ -993,7 +1144,10 @@ interface HistoryResponse {
   history?: HistoryRecord[];
 }
 
-async function applyGmailHistory(records: HistoryRecord[]) {
+async function applyGmailHistory(
+  records: HistoryRecord[],
+  accountId = gmailAccountId(),
+) {
   const added = new Set<string>();
   const deleted = new Set<string>();
   const labelOps: { id: string; add: string[]; remove: string[] }[] = [];
@@ -1012,13 +1166,16 @@ async function applyGmailHistory(records: HistoryRecord[]) {
   const newIds = [...added];
   if (newIds.length) {
     const [names, messages] = await Promise.all([
-      labelNames(),
+      labelNames(accountId),
       Promise.all(
-        newIds.map((id) =>
-          gmail<Message>(
-            `/messages/${id}?format=metadata` +
-              `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
-          ).catch(() => null), // may already be gone again
+        newIds.map(
+          (id) =>
+            gmail<Message>(
+              `/messages/${id}?format=metadata` +
+                `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+              undefined,
+              accountId,
+            ).catch(() => null), // may already be gone again
         ),
       ),
     ]);
@@ -1027,56 +1184,87 @@ async function applyGmailHistory(records: HistoryRecord[]) {
       .map((m) => toMail(m, names));
     if (mails.length) {
       await invoke("gmail_cache_upsert", {
-        account_id: gmailCacheAccount(),
+        account_id: accountId,
         messages: mails.map(mailToRow),
       });
-      void prefetchBodies(mails);
+      void prefetchBodies(mails, accountId);
       void notifyNewMail(mails.filter(isUnreadInboxArrival));
     }
   }
   if (deleted.size) {
     await invoke("gmail_cache_delete", {
-      account_id: gmailCacheAccount(),
+      account_id: accountId,
       ids: [...deleted],
     });
   }
   for (const op of labelOps) {
     if (deleted.has(op.id) || added.has(op.id)) continue; // already final
-    await applyGmailLabelChange(op.id, op.add, op.remove);
+    await applyGmailLabelChange(op.id, op.add, op.remove, accountId);
   }
 }
 
-export function useGmailSync(enabled = true, intervalMs = 30_000) {
+// Keep each account's cursor across mail-view remounts so switching back
+// catches changes that arrived while another account was active.
+const historyIds = new Map<string, string>();
+
+export function useGmailSync(
+  enabled = true,
+  intervalMs = 30_000,
+  accountId = gmailAccountId(),
+) {
   const queryClient = useQueryClient();
-  const lastHistoryId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    let lastHistoryId = historyIds.get(accountId) ?? null;
+    let running = false;
 
     const tick = async () => {
+      if (cancelled || running) return;
+      running = true;
       try {
-        if (!lastHistoryId.current) {
-          const profile = await gmail<Profile>("/profile");
-          if (!cancelled) lastHistoryId.current = profile.historyId;
+        if (!lastHistoryId) {
+          const profile = await gmail<Profile>(
+            "/profile",
+            undefined,
+            accountId,
+          );
+          if (!cancelled) {
+            lastHistoryId = profile.historyId;
+            historyIds.set(accountId, profile.historyId);
+          }
           return;
         }
         const delta = await gmail<HistoryResponse>(
-          `/history?startHistoryId=${lastHistoryId.current}`,
+          `/history?startHistoryId=${lastHistoryId}`,
+          undefined,
+          accountId,
         );
         if (cancelled) return;
-        lastHistoryId.current = delta.historyId;
         if (delta.history?.length) {
-          await applyGmailHistory(delta.history);
-          queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
-          queryClient.invalidateQueries({ queryKey: ["gmail", "counts"] });
+          await applyGmailHistory(delta.history, accountId);
+          queryClient.invalidateQueries({
+            queryKey: ["gmail", accountId, "list"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["gmail", accountId, "counts"],
+          });
+        }
+        if (!cancelled) {
+          lastHistoryId = delta.historyId;
+          historyIds.set(accountId, delta.historyId);
         }
       } catch {
+        if (cancelled) return;
         // Expired/invalid historyId (Gmail keeps history ~1 week) — reseed,
         // force full folder resyncs, and refresh everything once.
-        lastHistoryId.current = null;
-        invalidateFolderSyncState();
-        queryClient.invalidateQueries({ queryKey: ["gmail"] });
+        lastHistoryId = null;
+        historyIds.delete(accountId);
+        invalidateFolderSyncState(accountId);
+        queryClient.invalidateQueries({ queryKey: ["gmail", accountId] });
+      } finally {
+        running = false;
       }
     };
 
@@ -1086,5 +1274,5 @@ export function useGmailSync(enabled = true, intervalMs = 30_000) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [queryClient, enabled, intervalMs]);
+  }, [queryClient, enabled, intervalMs, accountId]);
 }

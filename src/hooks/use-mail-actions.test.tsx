@@ -42,7 +42,7 @@ vi.mock("@/context/AccountContext", () => ({
   }),
 }));
 
-const LIST_KEY = ["gmail", "list", "inbox", ""];
+const LIST_KEY = ["gmail", "g1", "list", "inbox", ""];
 
 function setup(onRemoved?: (id: string) => void) {
   const client = new QueryClient({
@@ -52,7 +52,7 @@ function setup(onRemoved?: (id: string) => void) {
     mail({ id: "m1", read: false }),
     mail({ id: "m2", read: true, name: "Bob" }),
   ]);
-  client.setQueryData(["gmail", "counts"], { inbox: 1 });
+  client.setQueryData(["gmail", "g1", "counts"], { inbox: 1 });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
@@ -74,9 +74,13 @@ describe("useMailActions (Gmail)", () => {
     await waitFor(() => {
       expect(client.getQueryData<Mail[]>(LIST_KEY)![0].read).toBe(true);
     });
-    await waitFor(() => expect(gmailApi.markRead).toHaveBeenCalledWith("m1"));
+    await waitFor(() =>
+      expect(gmailApi.markRead).toHaveBeenCalledWith("m1", "g1"),
+    );
     // Unread badge decremented optimistically.
-    expect(client.getQueryData(["gmail", "counts"])).toEqual({ inbox: 0 });
+    expect(client.getQueryData(["gmail", "g1", "counts"])).toEqual({
+      inbox: 0,
+    });
   });
 
   it("archive removes the mail from the list and reports removal", async () => {
@@ -85,13 +89,13 @@ describe("useMailActions (Gmail)", () => {
     result.current.act("archive", "m1");
 
     await waitFor(() => {
-      expect(
-        client.getQueryData<Mail[]>(LIST_KEY)!.map((m) => m.id),
-      ).toEqual(["m2"]);
+      expect(client.getQueryData<Mail[]>(LIST_KEY)!.map((m) => m.id)).toEqual([
+        "m2",
+      ]);
     });
     expect(removed).toHaveBeenCalledWith("m1");
     await waitFor(() =>
-      expect(gmailApi.archiveMessage).toHaveBeenCalledWith("m1"),
+      expect(gmailApi.archiveMessage).toHaveBeenCalledWith("m1", "g1"),
     );
   });
 
@@ -102,7 +106,7 @@ describe("useMailActions (Gmail)", () => {
 
     // The optimistic removal is rolled back once the server rejects.
     await waitFor(() =>
-      expect(gmailApi.trashMessage).toHaveBeenCalledWith("m2"),
+      expect(gmailApi.trashMessage).toHaveBeenCalledWith("m2", "g1"),
     );
     await waitFor(() => {
       expect(client.getQueryData<Mail[]>(LIST_KEY)).toHaveLength(2);
@@ -118,7 +122,11 @@ describe("useMailActions (Gmail)", () => {
     result.current.act("archive", "m1");
 
     await waitFor(() =>
-      expect(queue.queueGmailAction).toHaveBeenCalledWith("m1", "archive"),
+      expect(queue.queueGmailAction).toHaveBeenCalledWith(
+        "m1",
+        "archive",
+        "g1",
+      ),
     );
   });
 
@@ -130,7 +138,11 @@ describe("useMailActions (Gmail)", () => {
     result.current.act("archive", "m1");
 
     await waitFor(() =>
-      expect(queue.queueGmailAction).toHaveBeenCalledWith("m1", "archive"),
+      expect(queue.queueGmailAction).toHaveBeenCalledWith(
+        "m1",
+        "archive",
+        "g1",
+      ),
     );
   });
 
@@ -154,7 +166,11 @@ describe("useMailActions (Gmail)", () => {
     result.current.act("archive", "m1");
 
     await waitFor(() =>
-      expect(queue.queueGmailAction).toHaveBeenCalledWith("m1", "archive"),
+      expect(queue.queueGmailAction).toHaveBeenCalledWith(
+        "m1",
+        "archive",
+        "g1",
+      ),
     );
   });
 
@@ -170,9 +186,13 @@ describe("useMailActions (Gmail)", () => {
     });
     expect(removed).toHaveBeenCalledWith("m1");
     await waitFor(() =>
-      expect(gmailApi.junkMessage).toHaveBeenCalledWith("m1"),
+      expect(gmailApi.junkMessage).toHaveBeenCalledWith("m1", "g1"),
     );
-    expect(gmailApi.applyGmailActionToCache).toHaveBeenCalledWith("m1", "junk");
+    expect(gmailApi.applyGmailActionToCache).toHaveBeenCalledWith(
+      "m1",
+      "junk",
+      "g1",
+    );
   });
 
   it("not junk calls the SPAM-removal API", async () => {
@@ -180,7 +200,7 @@ describe("useMailActions (Gmail)", () => {
     result.current.act("notJunk", "m2");
 
     await waitFor(() =>
-      expect(gmailApi.notJunkMessage).toHaveBeenCalledWith("m2"),
+      expect(gmailApi.notJunkMessage).toHaveBeenCalledWith("m2", "g1"),
     );
   });
 
@@ -196,6 +216,40 @@ describe("useMailActions (Gmail)", () => {
       expect(client.getQueryData<Mail[]>(LIST_KEY)).toHaveLength(2);
     });
     expect(queue.queueGmailAction).not.toHaveBeenCalled();
-    expect(gmailApi.removeGmailFromCache).toHaveBeenCalledWith("m1");
+    expect(gmailApi.removeGmailFromCache).toHaveBeenCalledWith("m1", "g1");
+  });
+});
+
+describe("account-scoped optimistic updates", () => {
+  it("leaves another account with the same message id untouched on failure", async () => {
+    const { client, result } = setup();
+    const otherKey = ["gmail", "g2", "list", "inbox", ""];
+    const otherMail = mail({
+      id: "m1",
+      subject: "Another account",
+      read: false,
+    });
+    client.setQueryData(otherKey, [otherMail]);
+    client.setQueryData(["gmail", "g2", "counts"], { inbox: 8 });
+    let reject!: (error: Error) => void;
+    gmailApi.archiveMessage.mockImplementation(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+    );
+    result.current.act("archive", "m1");
+    await waitFor(() =>
+      expect(client.getQueryData<Mail[]>(LIST_KEY)).toHaveLength(1),
+    );
+    expect(client.getQueryData(otherKey)).toEqual([otherMail]);
+    reject(new Error("Google API 400: rejected"));
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+    expect(client.getQueryData<Mail[]>(LIST_KEY)).toHaveLength(2);
+    expect(client.getQueryData(otherKey)).toEqual([otherMail]);
+    expect(client.getQueryData(["gmail", "g2", "counts"])).toEqual({
+      inbox: 8,
+    });
+    expect(client.getQueryState(otherKey)?.isInvalidated).toBe(false);
   });
 });

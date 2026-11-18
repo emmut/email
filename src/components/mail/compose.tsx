@@ -5,7 +5,12 @@ import {
   useState,
   type MutableRefObject,
 } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import {
   AlertDialog,
@@ -258,7 +263,12 @@ function ComposeFields({
   const selectedIsIcloud = selectedAccount?.kind === "icloud";
 
   // Tags and contact autocomplete are Gmail features.
-  const { data: tags } = useQuery({ ...tagsQuery, enabled: !selectedIsIcloud });
+  const { data: tags } = useQuery({
+    ...tagsQuery(selectedAccountId ?? undefined),
+    enabled: !selectedIsIcloud,
+  });
+
+  useEffect(() => setTagIds([]), [selectedAccountId]);
 
   const toggleTag = (id: string) =>
     setTagIds((prev) =>
@@ -293,20 +303,24 @@ function ComposeFields({
 
   // Contacts from every connected source, deduped by address (a contact in
   // both keeps the named/Google entry). The list itself shows the origin.
-  const hasGoogle =
-    accounts.length === 0 || accounts.some((a) => a.kind === "google");
+  const googleAccounts = accounts.filter((a) => a.kind === "google");
+  const googleContacts = useQueries({
+    queries:
+      accounts.length === 0
+        ? [contactsQuery()]
+        : googleAccounts.map((account) => contactsQuery(account.id)),
+  });
   const hasIcloud = accounts.some((a) => a.kind === "icloud");
-  const googleContacts = useQuery({ ...contactsQuery, enabled: hasGoogle });
   const icloudContacts = useQuery({
     ...icloudContactsQuery,
     enabled: hasIcloud,
   });
-  const contactsFailed = hasGoogle && googleContacts.isError;
-  const contactsError = googleContacts.error;
+  const contactsError = googleContacts.find((query) => query.isError)?.error;
+  const contactsFailed = !!contactsError;
   const contacts = useMemo(() => {
     const byEmail = new Map<string, Contact>();
     for (const c of [
-      ...(googleContacts.data ?? []),
+      ...googleContacts.flatMap((query) => query.data ?? []),
       ...(icloudContacts.data ?? []),
     ]) {
       const key = c.email.toLowerCase();
@@ -314,7 +328,7 @@ function ComposeFields({
       if (!existing || (!existing.name && c.name)) byEmail.set(key, c);
     }
     return [...byEmail.values()];
-  }, [googleContacts.data, icloudContacts.data]);
+  }, [googleContacts, icloudContacts.data]);
 
   const buildOutgoing = (): OutgoingMail => ({
     to,
@@ -356,15 +370,17 @@ function ComposeFields({
       } else {
         // Send via Gmail API (default)
         try {
-          await sendMessage(msg);
+          await sendMessage(msg, selectedAccountId ?? undefined);
         } catch (err) {
           if (!isNetworkError(err)) throw err;
-          await queueGmailSend(msg);
+          await queueGmailSend(msg, selectedAccountId ?? undefined);
         }
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
+      queryClient.invalidateQueries({
+        queryKey: ["gmail", selectedAccountId, "list"],
+      });
       queryClient.invalidateQueries({ queryKey: ["icloud"] });
       queryClient.invalidateQueries({ queryKey: ["ops"] });
       onClose();
@@ -381,12 +397,16 @@ function ComposeFields({
         // them in server-side like Gmail does).
         await icloudSaveDraft(account.id, buildRfc822(msg, account.email));
       } else {
-        await saveDraft(msg);
+        await saveDraft(msg, selectedAccountId ?? undefined);
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
-      queryClient.invalidateQueries({ queryKey: ["gmail", "counts"] });
+      queryClient.invalidateQueries({
+        queryKey: ["gmail", selectedAccountId, "list"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["gmail", selectedAccountId, "counts"],
+      });
       queryClient.invalidateQueries({ queryKey: ["icloud"] });
       onClose();
     },

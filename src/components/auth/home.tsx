@@ -20,5 +20,9 @@ export function Home() {
   // Browser development has no Tauri account database and intentionally uses
   // the mock inbox. The desktop app must have a real, selected account before
   // any provider queries are allowed to mount.
-  return activeAccount || !isDesktopApp ? <Mail /> : <SignIn />;
+  return activeAccount || !isDesktopApp ? (
+    <Mail key={activeAccount?.id ?? "browser"} />
+  ) : (
+    <SignIn />
+  );
 }

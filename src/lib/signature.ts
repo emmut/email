@@ -38,12 +38,14 @@ export function useSignature(account: Account | null | undefined) {
     ...localSignatureQuery(account?.id ?? ""),
     enabled: !!account,
   });
-  const hosted = useQuery({ ...signatureQuery, enabled: usesHosted });
+  const hosted = useQuery({
+    ...signatureQuery(account?.id),
+    enabled: usesHosted && (!account || local.isSuccess) && local.data == null,
+  });
 
   const isPending =
     (!!account && local.isPending) ||
     (usesHosted && local.data == null && hosted.isPending);
-  const signature =
-    local.data ?? (usesHosted ? (hosted.data ?? "") : "");
+  const signature = local.data ?? (usesHosted ? (hosted.data ?? "") : "");
   return { signature, isPending, hasLocal: local.data != null };
 }

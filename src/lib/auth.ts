@@ -9,7 +9,8 @@ export const isDesktopApp = inTauri;
 
 export const authStatusQuery = queryOptions({
   queryKey: ["auth", "status"],
-  queryFn: () => (inTauri ? invoke<boolean>("auth_status") : Promise.resolve(true)),
+  queryFn: () =>
+    inTauri ? invoke<boolean>("auth_status") : Promise.resolve(true),
   staleTime: Infinity,
 });
 
@@ -23,8 +24,7 @@ export function signOut(): Promise<void> {
 
 // The per-account keychain entry is the canonical token store; the legacy
 // single "gmail-refresh-token" entry only exists for sign-ins that predate
-// multi-account support (no account row). Gmail is still single-account, so
-// the first Google account row wins.
+// multi-account support (no account row).
 let googleAccountIdPromise: Promise<string | null> | null = null;
 
 function findGoogleAccountId(): Promise<string | null> {
@@ -59,35 +59,50 @@ function withTokenRenewHint(err: unknown): Error {
   return err instanceof Error ? err : new Error(msg);
 }
 
-export async function getAccessToken(): Promise<string> {
+// Concurrent inbox/profile/count requests share one refresh. Do not retain
+// resolved tokens here: the backend owns expiry and refresh-token storage.
+const pendingTokens = new Map<string | null, Promise<string>>();
+
+export function getAccessToken(
+  accountId: string | null = localStorage.getItem("activeAccountId"),
+): Promise<string> {
+  let pending = pendingTokens.get(accountId);
+  if (!pending) {
+    pending = resolveAccessToken(accountId).finally(() =>
+      pendingTokens.delete(accountId),
+    );
+    pendingTokens.set(accountId, pending);
+  }
+  return pending;
+}
+
+async function resolveAccessToken(accountId: string | null): Promise<string> {
   try {
-    // Prefer the currently active account (set by AccountContext) when present.
-    const active = localStorage.getItem("activeAccountId");
-    if (active) {
-      try {
-        return await invoke("get_google_access_token", { account_id: active });
-      } catch (err) {
-        // If the active account can't refresh, fall back to legacy resolution.
-        resetGoogleAccountId();
-      }
+    // An explicit account must never fall back to another user's token.
+    if (accountId) {
+      return await invoke("get_google_access_token", { account_id: accountId });
     }
 
-    const accountId = await findGoogleAccountId();
-    if (accountId) {
+    const legacyAccountId = await findGoogleAccountId();
+    if (legacyAccountId) {
       try {
-        return await invoke("get_google_access_token", { account_id: accountId });
+        return await invoke("get_google_access_token", {
+          account_id: legacyAccountId,
+        });
       } catch (err) {
         // Belt and braces: the cached id may point at a removed account row.
         // Re-resolve once; rethrow if the account genuinely can't refresh.
         resetGoogleAccountId();
         const freshId = await findGoogleAccountId();
-        if (freshId && freshId !== accountId) {
-          return invoke("get_google_access_token", { account_id: freshId });
+        if (freshId && freshId !== legacyAccountId) {
+          return await invoke("get_google_access_token", {
+            account_id: freshId,
+          });
         }
         throw err;
       }
     }
-    return invoke("get_access_token");
+    return await invoke("get_access_token");
   } catch (err) {
     throw withTokenRenewHint(err);
   }

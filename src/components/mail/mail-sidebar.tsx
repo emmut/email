@@ -115,9 +115,12 @@ export function MailSidebar({
     isLoading,
   } = useAccount();
   const isIcloud = activeAccount?.kind === "icloud";
-  const { data: profile } = useQuery({ ...profileQuery, enabled: !isIcloud });
+  const { data: profile } = useQuery({
+    ...profileQuery(activeAccount?.id),
+    enabled: !isIcloud,
+  });
   const { data: gmailCounts } = useQuery({
-    ...folderCountsQuery,
+    ...folderCountsQuery(activeAccount?.id),
     enabled: !isIcloud,
   });
   const { data: icloudCounts } = useQuery({
@@ -125,13 +128,16 @@ export function MailSidebar({
     enabled: isIcloud,
   });
   const counts = isIcloud ? icloudCounts : gmailCounts;
-  const { data: tags } = useQuery({ ...tagsQuery, enabled: !isIcloud });
+  const { data: tags } = useQuery({
+    ...tagsQuery(activeAccount?.id),
+    enabled: !isIcloud,
+  });
   const { data: icloudFolders } = useQuery({
     ...icloudFoldersQuery(activeAccount?.id ?? ""),
     enabled: isIcloud,
   });
   const { data: gmailAvatar } = useQuery({
-    ...avatarQuery,
+    ...avatarQuery(activeAccount?.id),
     enabled: !isIcloud,
   });
   const { data: icloudAvatar } = useQuery({
@@ -153,9 +159,11 @@ export function MailSidebar({
   const navigate = useNavigate();
 
   const createTagMutation = useMutation({
-    mutationFn: createTag,
+    mutationFn: (name: string) => createTag(name, activeAccount?.id),
     onSuccess: (tag) => {
-      queryClient.invalidateQueries({ queryKey: ["gmail", "tags"] });
+      queryClient.invalidateQueries({
+        queryKey: ["gmail", activeAccount?.id, "tags"],
+      });
       setNewTagOpen(false);
       setNewTagName("");
       onSelectFolder(tagFolderId(tag.id));
@@ -163,10 +171,14 @@ export function MailSidebar({
   });
 
   const deleteTagMutation = useMutation({
-    mutationFn: (tag: Tag) => deleteTag(tag.id),
+    mutationFn: (tag: Tag) => deleteTag(tag.id, activeAccount?.id),
     onSuccess: (_data, tag) => {
-      queryClient.invalidateQueries({ queryKey: ["gmail", "tags"] });
-      queryClient.invalidateQueries({ queryKey: ["gmail", "list"] });
+      queryClient.invalidateQueries({
+        queryKey: ["gmail", activeAccount?.id, "tags"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["gmail", activeAccount?.id, "list"],
+      });
       if (activeFolder === tagFolderId(tag.id)) onSelectFolder("inbox");
     },
   });
@@ -206,7 +218,7 @@ export function MailSidebar({
         // clear it (and the local Gmail cache) when the last one goes away.
         if (lastGoogle) {
           await invoke("sign_out");
-          await clearGmailCache();
+          await clearGmailCache(activeAccount?.id);
         }
       } else {
         // Legacy Google sign-in with no account row.
@@ -215,8 +227,8 @@ export function MailSidebar({
       }
     },
     onSuccess: () => {
-      queryClient.removeQueries({ queryKey: ["gmail"] });
-      queryClient.removeQueries({ queryKey: ["icloud"] });
+      queryClient.removeQueries({ queryKey: ["gmail", activeAccount?.id] });
+      queryClient.removeQueries({ queryKey: ["icloud", activeAccount?.id] });
       queryClient.invalidateQueries({ queryKey: ["auth"] });
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
