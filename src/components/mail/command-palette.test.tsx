@@ -1,6 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 
 import { CommandPalette } from "@/components/mail/command-palette";
 import { mail } from "@/test/fixtures";
@@ -29,14 +36,32 @@ const handlers = () => ({
   onEmptyTrash: vi.fn(),
 });
 
-function renderPalette(
-  selected = mail({ read: true }),
+async function renderPalette(
+  selected: ReturnType<typeof mail> | null = mail({ read: true }),
   junkAction: "junk" | "notJunk" | null = "junk",
 ) {
   const h = handlers();
+  const rootRoute = createRootRoute();
+  const mailRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    component: () => (
+      <CommandPalette open selected={selected} junkAction={junkAction} {...h} />
+    ),
+  });
+  const settingsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/settings",
+    component: () => <h1>Settings</h1>,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([mailRoute, settingsRoute]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  await router.load();
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <CommandPalette open selected={selected} junkAction={junkAction} {...h} />
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   );
   return h;
@@ -47,8 +72,8 @@ beforeEach(() => {
 });
 
 describe("CommandPalette", () => {
-  it("lists global actions", () => {
-    renderPalette();
+  it("lists global actions", async () => {
+    await renderPalette();
     for (const label of [
       "Compose",
       "Search mail",
@@ -60,8 +85,8 @@ describe("CommandPalette", () => {
     }
   });
 
-  it("shows Mark as unread for a read message and runs it", () => {
-    const h = renderPalette(mail({ id: "m9", read: true }));
+  it("shows Mark as unread for a read message and runs it", async () => {
+    const h = await renderPalette(mail({ id: "m9", read: true }));
     const item = screen.getByText("Mark as unread");
     expect(screen.queryByText("Mark as read")).not.toBeInTheDocument();
     fireEvent.click(item);
@@ -69,50 +94,54 @@ describe("CommandPalette", () => {
     expect(h.onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("shows Mark as read for an unread message", () => {
-    const h = renderPalette(mail({ id: "m9", read: false }));
+  it("shows Mark as read for an unread message", async () => {
+    const h = await renderPalette(mail({ id: "m9", read: false }));
     fireEvent.click(screen.getByText("Mark as read"));
     expect(h.onAct).toHaveBeenCalledWith("read", "m9");
   });
 
-  it("hides message actions with nothing selected", () => {
-    const h = handlers();
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <CommandPalette open selected={null} junkAction="junk" {...h} />
-      </QueryClientProvider>,
-    );
+  it("hides message actions with nothing selected", async () => {
+    await renderPalette(null);
     expect(screen.queryByText("Mark as unread")).not.toBeInTheDocument();
     expect(screen.queryByText("Move to trash")).not.toBeInTheDocument();
   });
 
-  it("shows Mark as junk and runs it", () => {
-    const h = renderPalette(mail({ id: "m9", read: true }));
+  it("shows Mark as junk and runs it", async () => {
+    const h = await renderPalette(mail({ id: "m9", read: true }));
     expect(screen.queryByText("Mark as not junk")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Mark as junk"));
     expect(h.onAct).toHaveBeenCalledWith("junk", "m9");
   });
 
-  it("shows Mark as not junk inside the junk folder", () => {
-    const h = renderPalette(mail({ id: "m9", read: true }), "notJunk");
+  it("shows Mark as not junk inside the junk folder", async () => {
+    const h = await renderPalette(mail({ id: "m9", read: true }), "notJunk");
     fireEvent.click(screen.getByText("Mark as not junk"));
     expect(h.onAct).toHaveBeenCalledWith("notJunk", "m9");
   });
 
-  it("hides the junk action where none applies (drafts)", () => {
-    renderPalette(mail({ id: "m9", read: true }), null);
+  it("hides the junk action where none applies (drafts)", async () => {
+    await renderPalette(mail({ id: "m9", read: true }), null);
     expect(screen.queryByText(/mark as (not )?junk/i)).not.toBeInTheDocument();
   });
 
-  it("empty trash asks the host for confirmation flow", () => {
-    const h = renderPalette();
+  it("empty trash asks the host for confirmation flow", async () => {
+    const h = await renderPalette();
     fireEvent.click(screen.getByText("Empty trash"));
     expect(h.onEmptyTrash).toHaveBeenCalled();
   });
 
-  it("navigates to folders", () => {
-    const h = renderPalette();
+  it("navigates to folders", async () => {
+    const h = await renderPalette();
     fireEvent.click(screen.getByText("Trash"));
     expect(h.onSelectFolder).toHaveBeenCalledWith("trash");
+  });
+
+  it("opens settings through the router", async () => {
+    const h = await renderPalette();
+    fireEvent.click(screen.getByText("Open settings"));
+    expect(
+      await screen.findByRole("heading", { name: "Settings" }),
+    ).toBeInTheDocument();
+    expect(h.onOpenChange).toHaveBeenCalledWith(false);
   });
 });
