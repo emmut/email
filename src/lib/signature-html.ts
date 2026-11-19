@@ -9,7 +9,7 @@ export function sanitizeSignature(html: string): string {
   });
 }
 
-export function signatureBlock(html: string): string {
+export function signatureBlock(html: string, compose = false): string {
   const safe = sanitizeSignature(html);
-  return safe ? `<div data-email-signature="true">${safe}</div>` : "";
+  return safe || compose ? `<div data-email-signature="true"${compose ? ' data-compose-signature="true"' : ""}>${safe}</div>` : "";
 }

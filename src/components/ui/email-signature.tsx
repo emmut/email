@@ -5,6 +5,7 @@ import { SignaturePreview } from "@/components/ui/signature-preview";
 import { sanitizeSignature } from "@/lib/signature-html";
 
 function SignatureView({ node }: NodeViewProps) {
+  if (!node.attrs.html) return <NodeViewWrapper className="hidden" contentEditable={false} />;
   return (
     <NodeViewWrapper contentEditable={false} className="my-2 overflow-hidden rounded border border-border">
       <div className="bg-muted px-2 py-1 text-xs text-muted-foreground">
@@ -23,17 +24,18 @@ export const EmailSignature = Node.create({
   atom: true,
   draggable: true,
   addAttributes() {
-    return { html: { default: "", rendered: false } };
+    return { html: { default: "", rendered: false }, compose: { default: false, rendered: false } };
   },
   parseHTML() {
     return [{
       tag: 'div[data-email-signature="true"]',
-      getAttrs: (element) => ({ html: sanitizeSignature(element.innerHTML) }),
+      getAttrs: (element) => ({ html: sanitizeSignature(element.innerHTML), compose: element.getAttribute("data-compose-signature") === "true" }),
     }];
   },
   renderHTML({ node }) {
     const element = document.createElement("div");
     element.setAttribute("data-email-signature", "true");
+    if (node.attrs.compose) element.setAttribute("data-compose-signature", "true");
     element.innerHTML = sanitizeSignature(node.attrs.html as string);
     return element;
   },

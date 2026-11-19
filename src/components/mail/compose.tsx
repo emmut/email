@@ -49,7 +49,8 @@ import {
   type Contact,
   type OutgoingMail,
 } from "@/lib/gmail";
-import { useSignature } from "@/lib/signature";
+import { ACCOUNT_SIGNATURE, NO_SIGNATURE, resolveSignature, useSignature, useSignatureLibrary } from "@/lib/signature";
+import { SignatureSelect } from "@/components/ui/signature-select";
 import { signatureBlock } from "@/lib/signature-html";
 import {
   icloudContactsQuery,
@@ -181,7 +182,7 @@ function ComposeForm({
   // The editor takes its content at mount, so wait for the signature first.
   // Resolved per account: local signature, Gmail-hosted fallback (Google).
   const { activeAccount } = useAccount();
-  const { signature, isPending } = useSignature(activeAccount);
+  const { signature, isPending, error } = useSignature(activeAccount);
 
   return (
     <DialogContent className="sm:max-w-2xl">
@@ -194,7 +195,7 @@ function ComposeForm({
               : "New message"}
         </DialogTitle>
       </DialogHeader>
-      {isPending ? (
+      {error ? <p role="alert" className="text-sm text-destructive">Could not load signatures. Close this message and try again.</p> : isPending ? (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-8 w-full" />
           <Skeleton className="h-8 w-full" />
@@ -247,29 +248,24 @@ function ComposeFields({
 
   const buildHtml = (sig: string) =>
     "<p></p>" +
-    (sig ? `<p></p><p>--</p>${signatureBlock(sig)}` : "") +
+    signatureBlock(sig, true) +
     (draft.bodyHtml ?? "");
   const [body, setBody] = useState(() => ({
     html: buildHtml(signature),
     text: "",
   }));
 
-  // The signature follows the From account. When it changes and the user
-  // hasn't typed yet, rebuild the editor content with the new account's
-  // signature (a bumped key remounts the editor). Once the user has typed we
-  // leave the content alone rather than clobber it.
   const edited = useRef(false);
-  const [editorKey, setEditorKey] = useState(0);
-  const [currentSig, setCurrentSig] = useState(signature);
-  const selectedSig = useSignature(selectedAccount);
-  useEffect(() => {
-    if (selectedSig.isPending || edited.current) return;
-    if (selectedSig.signature === currentSig) return;
-    setCurrentSig(selectedSig.signature);
-    setBody({ html: buildHtml(selectedSig.signature), text: "" });
-    setEditorKey((k) => k + 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSig.signature, selectedSig.isPending]);
+  const [signatureOverride, setSignatureOverride] = useState<string | null>(null);
+  const selectedSig = useSignature(selectedAccount, signatureOverride === ACCOUNT_SIGNATURE);
+  const library = useSignatureLibrary();
+  const signatures = library.data?.signatures ?? [];
+  const signatureChoice = signatureOverride === null ? selectedSig.choice :
+    (signatureOverride === ACCOUNT_SIGNATURE || signatureOverride === NO_SIGNATURE || signatures.some((item) => item.id === signatureOverride))
+      ? signatureOverride : NO_SIGNATURE;
+  const signaturePending = selectedSig.isPending ||
+    (signatureChoice === ACCOUNT_SIGNATURE && selectedSig.accountIsPending);
+  const signatureHtml = resolveSignature(library.data ?? { signatures: [], defaults: {} }, signatureChoice, selectedSig.accountSignature);
 
   // Contacts from every connected source, deduped by address (a contact in
   // both keeps the named/Google entry). The list itself shows the origin.
@@ -409,7 +405,7 @@ function ComposeFields({
       }}
       onSubmit={(e) => {
         e.preventDefault();
-        if (!selectedAccountId) return;
+        if (!selectedAccountId || signaturePending) return;
         sendMutation.mutate({
           ...buildOutgoing(),
           labelIds: tagIds.length ? tagIds : undefined,
@@ -429,7 +425,7 @@ function ComposeFields({
           {accounts.map((acc) => (
             <DropdownMenuItem
               key={acc.id}
-              onClick={() => setSelectedAccountId(acc.id)}
+              onClick={() => { setSelectedAccountId(acc.id); setSignatureOverride(null); }}
               className={
                 acc.id === selectedAccountId ? "bg-accent font-medium" : ""
               }
@@ -475,9 +471,20 @@ function ComposeFields({
         value={subject}
         onChange={(e) => setSubject(e.target.value)}
       />
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Signature</span>
+        <SignatureSelect
+          label="Message signature"
+          signatures={signatures}
+          value={signatureChoice}
+          disabled={library.isPending || library.isError}
+          onChange={(choice) => { edited.current = true; setSignatureOverride(choice); }}
+        />
+      </div>
+      {(selectedSig.error || library.isError) && <p role="alert" className="text-xs text-destructive">Could not load saved signatures.</p>}
       <RichTextEditor
-        key={editorKey}
         initialHtml={body.html}
+        signatureHtml={signaturePending ? undefined : signatureHtml}
         autoFocus={isReply}
         onChange={(html, text) => {
           edited.current = true;
@@ -523,12 +530,12 @@ function ComposeFields({
         <Button
           type="button"
           variant="outline"
-          disabled={saveDraftMutation.isPending || sendMutation.isPending}
+          disabled={saveDraftMutation.isPending || sendMutation.isPending || signaturePending}
           onClick={() => saveDraftMutation.mutate()}
         >
           {saveDraftMutation.isPending ? "Saving…" : "Save draft"}
         </Button>
-        <Button type="submit" disabled={sendMutation.isPending}>
+        <Button type="submit" disabled={sendMutation.isPending || signaturePending}>
           {sendMutation.isPending ? "Sending…" : online ? "Send" : "Queue"}
         </Button>
       </DialogFooter>

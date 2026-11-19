@@ -1,3 +1,5 @@
+import { useEffect } from "react"
+import { updateComposeSignature } from "@/lib/compose-signature"
 import {
   EditorContent,
   useEditor,
@@ -155,12 +157,14 @@ function Toolbar({ editor }: { editor: Editor }) {
 
 export function RichTextEditor({
   initialHtml,
+  signatureHtml,
   onChange,
   className,
   autoFocus,
   mention,
 }: {
   initialHtml?: string
+  signatureHtml?: string
   onChange: (html: string, text: string, markdown: string) => void
   className?: string
   autoFocus?: boolean
@@ -211,6 +215,10 @@ export function RichTextEditor({
       },
     },
   })
+
+  useEffect(() => {
+    if (editor && signatureHtml !== undefined) updateComposeSignature(editor, signatureHtml)
+  }, [editor, signatureHtml])
 
   if (!editor) return null
 
