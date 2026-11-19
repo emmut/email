@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Star, Trash2, UserPlus } from "lucide-react";
+import { useState } from 'react';
+import { Star, Trash2, UserPlus } from 'lucide-react';
 
 import {
   AlertDialog,
@@ -10,28 +10,28 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+} from '@/components/ui/alert-dialog';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@/components/ui/empty";
-import { useAccount } from "@/context/AccountContext";
-import { initialsFromEmail } from "@/lib/utils";
-import type { Account } from "@/types/account";
+} from '@/components/ui/empty';
+import { useAccount } from '@/context/account-context';
+import { initialsFromEmail } from '@/lib/utils';
+import type { Account } from '@/types/account';
 
 export function AccountsSection() {
   const {
@@ -45,24 +45,23 @@ export function AccountsSection() {
   } = useAccount();
   const [removeTarget, setRemoveTarget] = useState<Account | null>(null);
   const [icloudOpen, setIcloudOpen] = useState(false);
-  const [icloudEmail, setIcloudEmail] = useState("");
-  const [icloudPassword, setIcloudPassword] = useState("");
+  const [icloudEmail, setIcloudEmail] = useState('');
+  const [icloudPassword, setIcloudPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [adding, setAdding] = useState<"google" | "icloud" | null>(null);
+  const [adding, setAdding] = useState<'google' | 'icloud' | null>(null);
 
-  const attempt = (fn: () => Promise<void>) => async () => {
-    setError(null);
-    try {
-      await fn();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
+  function attempt(fn: () => Promise<void>) {
+    return async () => {
+      setError(null);
+      try {
+        await fn();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    };
+  }
 
-  const addAccount = async (
-    kind: "google" | "icloud",
-    fn: () => Promise<void>,
-  ) => {
+  async function addAccount(kind: 'google' | 'icloud', fn: () => Promise<void>) {
     setError(null);
     setAdding(kind);
     try {
@@ -74,67 +73,63 @@ export function AccountsSection() {
     } finally {
       setAdding(null);
     }
-  };
+  }
 
   return (
     <div className="flex flex-col gap-4">
       {accounts.length > 0 ? (
         <div className="divide-y rounded-lg border">
           {accounts.map((acc) => (
-          <div key={acc.id} className="flex items-center gap-3 p-3">
-            <Avatar className="size-8 rounded-lg">
-              {acc.avatar_url && <AvatarImage src={acc.avatar_url} alt="" />}
-              <AvatarFallback className="rounded-lg text-xs">
-                {initialsFromEmail(acc.email)}
-              </AvatarFallback>
-            </Avatar>
-            <div className="grid min-w-0 flex-1 text-sm leading-tight">
-              <span className="truncate font-medium">{acc.email}</span>
-              <span className="text-muted-foreground text-xs">
-                {acc.kind === "google" ? "Google" : "iCloud"}
-                {acc.id === activeAccountId && " · active"}
-              </span>
+            <div key={acc.id} className="flex items-center gap-3 p-3">
+              <Avatar className="size-8 rounded-lg">
+                {acc.avatar_url && <AvatarImage src={acc.avatar_url} alt="" />}
+                <AvatarFallback className="rounded-lg text-xs">
+                  {initialsFromEmail(acc.email)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="grid min-w-0 flex-1 text-sm leading-tight">
+                <span className="truncate font-medium">{acc.email}</span>
+                <span className="text-muted-foreground text-xs">
+                  {acc.kind === 'google' ? 'Google' : 'iCloud'}
+                  {acc.id === activeAccountId && ' · active'}
+                </span>
+              </div>
+              {acc.is_default ? (
+                <Badge variant="outline" className="shrink-0 font-normal" title="Opens at launch">
+                  Default
+                </Badge>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground shrink-0"
+                  title="Open this account at launch"
+                  onClick={attempt(() => setDefaultAccount(acc.id))}
+                >
+                  <Star data-icon="inline-start" />
+                  Make default
+                </Button>
+              )}
+              {acc.id !== activeAccountId && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={attempt(() => switchAccount(acc.id))}
+                >
+                  Switch
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground hover:text-destructive shrink-0"
+                aria-label={`Remove ${acc.email}`}
+                onClick={() => setRemoveTarget(acc)}
+              >
+                <Trash2 />
+              </Button>
             </div>
-            {acc.is_default ? (
-              <Badge
-                variant="outline"
-                className="shrink-0 font-normal"
-                title="Opens at launch"
-              >
-                Default
-              </Badge>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground shrink-0"
-                title="Open this account at launch"
-                onClick={attempt(() => setDefaultAccount(acc.id))}
-              >
-                <Star data-icon="inline-start" />
-                Make default
-              </Button>
-            )}
-            {acc.id !== activeAccountId && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="shrink-0"
-                onClick={attempt(() => switchAccount(acc.id))}
-              >
-                Switch
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground hover:text-destructive shrink-0"
-              aria-label={`Remove ${acc.email}`}
-              onClick={() => setRemoveTarget(acc)}
-            >
-              <Trash2 />
-            </Button>
-          </div>
           ))}
         </div>
       ) : (
@@ -144,9 +139,7 @@ export function AccountsSection() {
               <UserPlus />
             </EmptyMedia>
             <EmptyTitle>No accounts connected</EmptyTitle>
-            <EmptyDescription>
-              Add Gmail or iCloud Mail to start using your inbox.
-            </EmptyDescription>
+            <EmptyDescription>Add Gmail or iCloud Mail to start using your inbox.</EmptyDescription>
           </EmptyHeader>
         </Empty>
       )}
@@ -161,10 +154,10 @@ export function AccountsSection() {
           variant="outline"
           size="sm"
           disabled={adding !== null}
-          onClick={() => void addAccount("google", addGoogleAccount)}
+          onClick={() => void addAccount('google', addGoogleAccount)}
         >
           <UserPlus data-icon="inline-start" />
-          {adding === "google" ? "Waiting for browser…" : "Add Google account"}
+          {adding === 'google' ? 'Waiting for browser…' : 'Add Google account'}
         </Button>
         <Button
           variant="outline"
@@ -182,10 +175,7 @@ export function AccountsSection() {
         </p>
       )}
 
-      <Dialog
-        open={icloudOpen}
-        onOpenChange={(open) => adding === null && setIcloudOpen(open)}
-      >
+      <Dialog open={icloudOpen} onOpenChange={(open) => adding === null && setIcloudOpen(open)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Add iCloud account</DialogTitle>
@@ -194,14 +184,16 @@ export function AccountsSection() {
             className="flex flex-col gap-4"
             onSubmit={async (e) => {
               e.preventDefault();
-              if (!icloudEmail || !icloudPassword) return;
-              const added = await addAccount("icloud", () =>
+              if (!icloudEmail || !icloudPassword) {
+                return;
+              }
+              const added = await addAccount('icloud', () =>
                 addICloudAccount(icloudEmail.trim(), icloudPassword),
               );
               if (added) {
                 setIcloudOpen(false);
-                setIcloudEmail("");
-                setIcloudPassword("");
+                setIcloudEmail('');
+                setIcloudPassword('');
               }
             }}
           >
@@ -219,7 +211,7 @@ export function AccountsSection() {
               type="password"
             />
             <p className="text-muted-foreground text-xs">
-              Generate an app-specific password at{" "}
+              Generate an app-specific password at{' '}
               <a
                 href="https://appleid.apple.com"
                 target="_blank"
@@ -245,11 +237,9 @@ export function AccountsSection() {
               </Button>
               <Button
                 type="submit"
-                disabled={
-                  adding !== null || !icloudEmail.trim() || !icloudPassword
-                }
+                disabled={adding !== null || !icloudEmail.trim() || !icloudPassword}
               >
-                {adding === "icloud" ? "Checking account…" : "Add account"}
+                {adding === 'icloud' ? 'Checking account…' : 'Add account'}
               </Button>
             </DialogFooter>
           </form>
@@ -262,19 +252,19 @@ export function AccountsSection() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              Remove {removeTarget?.email}?
-            </AlertDialogTitle>
+            <AlertDialogTitle>Remove {removeTarget?.email}?</AlertDialogTitle>
             <AlertDialogDescription>
-              The account is removed from this app; mail on the server is
-              untouched. You can add it again later.
+              The account is removed from this app; mail on the server is untouched. You can add it
+              again later.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (removeTarget) void attempt(() => removeAccount(removeTarget.id))();
+                if (removeTarget) {
+                  void attempt(() => removeAccount(removeTarget.id))();
+                }
                 setRemoveTarget(null);
               }}
             >

@@ -1,5 +1,5 @@
-import { Fragment, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Fragment, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRight,
   Folder,
@@ -8,29 +8,29 @@ import {
   Tag as TagIcon,
   Trash2,
   X,
-} from "lucide-react";
+} from 'lucide-react';
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@/components/ui/empty";
-import { Input } from "@/components/ui/input";
+} from '@/components/ui/empty';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { useAccount } from "@/context/AccountContext";
-import { createGmailFilter, deleteGmailFilter, tagsQuery } from "@/lib/gmail";
-import { icloudFoldersQuery } from "@/lib/icloud";
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { useAccount } from '@/context/account-context';
+import { createGmailFilter, deleteGmailFilter, tagsQuery } from '@/lib/gmail';
+import { icloudFoldersQuery } from '@/lib/icloud';
 import {
   canMaterializeGmailFilter,
   gmailFilterCriteria,
@@ -39,33 +39,29 @@ import {
   type MailRule,
   type RuleCondition,
   type RuleField,
-} from "@/lib/rules";
-import { cn } from "@/lib/utils";
+} from '@/lib/rules';
+import { cn } from '@/lib/utils';
 
-const FIELDS: RuleField[] = ["from", "to", "subject"];
+const FIELDS: RuleField[] = ['from', 'to', 'subject'];
 
 // Manage the active account's mail rules. Gmail rules become server-side
 // Gmail filters (they run even when the app is closed); iCloud rules are
 // applied by the app whenever new inbox mail is synced.
 export function RulesSection() {
   const { activeAccount } = useAccount();
-  if (!activeAccount) return null;
+  if (!activeAccount) {
+    return null;
+  }
   return (
     <RulesEditor
       key={activeAccount.id}
       accountId={activeAccount.id}
-      isGoogle={activeAccount.kind === "google"}
+      isGoogle={activeAccount.kind === 'google'}
     />
   );
 }
 
-function RulesEditor({
-  accountId,
-  isGoogle,
-}: {
-  accountId: string;
-  isGoogle: boolean;
-}) {
+function RulesEditor({ accountId, isGoogle }: { accountId: string; isGoogle: boolean }) {
   const queryClient = useQueryClient();
   const { data: rules } = useQuery(rulesQuery(accountId));
   const { data: tags } = useQuery({
@@ -77,30 +73,30 @@ function RulesEditor({
     enabled: !isGoogle,
   });
 
-  const [conditions, setConditions] = useState<RuleCondition[]>([
-    { field: "from", value: "" },
-  ]);
+  const [conditions, setConditions] = useState<RuleCondition[]>([{ field: 'from', value: '' }]);
   // null = nothing chosen yet (Base UI's Select shows its placeholder for null).
   const [target, setTarget] = useState<string | null>(null);
 
   const targets: { id: string; name: string }[] = isGoogle
     ? (tags ?? [])
     : (folders ?? []).map((name) => ({ id: name, name }));
-  const targetName = (rule: MailRule) => {
+  function targetName(rule: MailRule) {
     const action = rule.action;
-    return action.kind === "gmail-label"
+    return action.kind === 'gmail-label'
       ? (tags?.find((t) => t.id === action.labelId)?.name ?? action.labelId)
       : action.folder;
-  };
+  }
 
-  const persist = async (next: MailRule[]) => {
+  async function persist(next: MailRule[]) {
     await saveRules(accountId, next);
-    await queryClient.invalidateQueries({ queryKey: ["rules", accountId] });
-  };
+    await queryClient.invalidateQueries({ queryKey: ['rules', accountId] });
+  }
 
   const addRule = useMutation({
     mutationFn: async () => {
-      if (target === null) return;
+      if (target === null) {
+        return;
+      }
       const trimmed = conditions.map((c) => ({
         field: c.field,
         value: c.value.trim(),
@@ -110,8 +106,8 @@ function RulesEditor({
         enabled: true,
         conditions: trimmed,
         action: isGoogle
-          ? { kind: "gmail-label", labelId: target }
-          : { kind: "icloud-move", folder: target },
+          ? { kind: 'gmail-label', labelId: target }
+          : { kind: 'icloud-move', folder: target },
       };
       if (isGoogle) {
         rule.gmailFilterId = await createGmailFilter(
@@ -123,7 +119,7 @@ function RulesEditor({
       await persist([...(rules ?? []), rule]);
     },
     onSuccess: () => {
-      setConditions([{ field: "from", value: "" }]);
+      setConditions([{ field: 'from', value: '' }]);
       setTarget(null);
     },
   });
@@ -133,7 +129,7 @@ function RulesEditor({
       const next = { ...rule, enabled: !rule.enabled };
       // Gmail filters have no enabled flag: disable = delete the server-side
       // filter, enable = recreate it (new id).
-      if (rule.action.kind === "gmail-label") {
+      if (rule.action.kind === 'gmail-label') {
         if (rule.enabled && rule.gmailFilterId) {
           await deleteGmailFilter(rule.gmailFilterId, accountId);
           delete next.gmailFilterId;
@@ -151,8 +147,9 @@ function RulesEditor({
 
   const deleteRule = useMutation({
     mutationFn: async (rule: MailRule) => {
-      if (rule.gmailFilterId)
+      if (rule.gmailFilterId) {
         await deleteGmailFilter(rule.gmailFilterId, accountId);
+      }
       await persist((rules ?? []).filter((r) => r.id !== rule.id));
     },
   });
@@ -161,8 +158,7 @@ function RulesEditor({
     target !== null &&
     conditions.every((c) => c.value.trim().length > 0) &&
     (!isGoogle || canMaterializeGmailFilter(conditions));
-  const duplicateFields =
-    new Set(conditions.map((c) => c.field)).size !== conditions.length;
+  const duplicateFields = new Set(conditions.map((c) => c.field)).size !== conditions.length;
   const error = addRule.error ?? toggleRule.error ?? deleteRule.error;
   const TargetIcon = isGoogle ? TagIcon : Folder;
 
@@ -178,7 +174,7 @@ function RulesEditor({
             <EmptyDescription>
               {isGoogle
                 ? "Rules tag new incoming mail automatically, right on Google's servers."
-                : "Rules file new inbox mail into folders whenever the app syncs."}
+                : 'Rules file new inbox mail into folders whenever the app syncs.'}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -194,15 +190,13 @@ function RulesEditor({
               />
               <div
                 className={cn(
-                  "flex min-w-0 flex-1 flex-wrap items-center gap-1.5",
-                  !rule.enabled && "opacity-50",
+                  'flex min-w-0 flex-1 flex-wrap items-center gap-1.5',
+                  !rule.enabled && 'opacity-50',
                 )}
               >
                 {rule.conditions.map((c, i) => (
                   <Fragment key={i}>
-                    {i > 0 && (
-                      <span className="text-muted-foreground text-xs">and</span>
-                    )}
+                    {i > 0 && <span className="text-muted-foreground text-xs">and</span>}
                     <Badge variant="secondary" className="max-w-44 font-normal">
                       <span className="truncate">
                         {c.field}: “{c.value}”
@@ -235,7 +229,9 @@ function RulesEditor({
         className="bg-muted/40 flex flex-col gap-3 rounded-lg border p-3"
         onSubmit={(e) => {
           e.preventDefault();
-          if (valid) addRule.mutate();
+          if (valid) {
+            addRule.mutate();
+          }
         }}
       >
         <div className="text-sm font-medium">New rule</div>
@@ -245,9 +241,7 @@ function RulesEditor({
               value={cond.field}
               onValueChange={(field) =>
                 setConditions((cs) =>
-                  cs.map((c, j) =>
-                    j === i ? { ...c, field: field as RuleField } : c,
-                  ),
+                  cs.map((c, j) => (j === i ? { ...c, field: field as RuleField } : c)),
                 )
               }
             >
@@ -262,19 +256,13 @@ function RulesEditor({
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-muted-foreground shrink-0 text-sm">
-              contains
-            </span>
+            <span className="text-muted-foreground shrink-0 text-sm">contains</span>
             <Input
               value={cond.value}
-              placeholder={
-                cond.field === "subject" ? "invoice" : "name@example.com"
-              }
+              placeholder={cond.field === 'subject' ? 'invoice' : 'name@example.com'}
               onChange={(e) =>
                 setConditions((cs) =>
-                  cs.map((c, j) =>
-                    j === i ? { ...c, value: e.target.value } : c,
-                  ),
+                  cs.map((c, j) => (j === i ? { ...c, value: e.target.value } : c)),
                 )
               }
             />
@@ -284,9 +272,7 @@ function RulesEditor({
                 variant="ghost"
                 size="icon-sm"
                 className="shrink-0"
-                onClick={() =>
-                  setConditions((cs) => cs.filter((_, j) => j !== i))
-                }
+                onClick={() => setConditions((cs) => cs.filter((_, j) => j !== i))}
                 aria-label="Remove condition"
               >
                 <X />
@@ -305,10 +291,8 @@ function RulesEditor({
                   ...cs,
                   {
                     // Default the new row to a field not used yet.
-                    field:
-                      FIELDS.find((f) => !cs.some((c) => c.field === f)) ??
-                      "subject",
-                    value: "",
+                    field: FIELDS.find((f) => !cs.some((c) => c.field === f)) ?? 'subject',
+                    value: '',
                   },
                 ])
               }
@@ -317,7 +301,7 @@ function RulesEditor({
             </Button>
           )}
           <span className="text-muted-foreground ml-auto shrink-0 text-sm">
-            {isGoogle ? "apply tag" : "move to"}
+            {isGoogle ? 'apply tag' : 'move to'}
           </span>
           <Select
             value={target}
@@ -326,14 +310,9 @@ function RulesEditor({
             // the label up here.
             items={targets.map((t) => ({ value: t.id, label: t.name }))}
           >
-            <SelectTrigger
-              className="max-w-44"
-              aria-label={isGoogle ? "Tag" : "Folder"}
-            >
+            <SelectTrigger className="max-w-44" aria-label={isGoogle ? 'Tag' : 'Folder'}>
               <TargetIcon className="text-muted-foreground size-3.5" />
-              <SelectValue
-                placeholder={isGoogle ? "Choose tag…" : "Choose folder…"}
-              />
+              <SelectValue placeholder={isGoogle ? 'Choose tag…' : 'Choose folder…'} />
             </SelectTrigger>
             <SelectContent>
               {targets.map((t) => (
@@ -347,14 +326,12 @@ function RulesEditor({
         {targets.length === 0 && (
           <p className="text-muted-foreground text-xs">
             {isGoogle
-              ? "Create a tag in the sidebar first — rules apply tags."
-              : "Create a folder in the sidebar first — rules move mail into folders."}
+              ? 'Create a tag in the sidebar first — rules apply tags.'
+              : 'Create a folder in the sidebar first — rules move mail into folders.'}
           </p>
         )}
         {isGoogle && duplicateFields && (
-          <p className="text-destructive text-xs">
-            Gmail rules can use each field only once.
-          </p>
+          <p className="text-destructive text-xs">Gmail rules can use each field only once.</p>
         )}
         {error != null && (
           <p className="text-destructive text-xs">
@@ -365,14 +342,10 @@ function RulesEditor({
           <p className="text-muted-foreground text-xs">
             {isGoogle
               ? "Runs on Google's servers for new incoming mail."
-              : "Applied to new inbox mail when the app syncs."}
+              : 'Applied to new inbox mail when the app syncs.'}
           </p>
-          <Button
-            type="submit"
-            size="sm"
-            disabled={!valid || addRule.isPending}
-          >
-            {addRule.isPending ? "Adding…" : "Add rule"}
+          <Button type="submit" size="sm" disabled={!valid || addRule.isPending}>
+            {addRule.isPending ? 'Adding…' : 'Add rule'}
           </Button>
         </div>
       </form>

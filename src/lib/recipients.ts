@@ -12,16 +12,20 @@ export function splitAddressList(raw: string): string[] {
     const char = raw[i];
     if (escaped) {
       escaped = false;
-    } else if (char === "\\" && (quoted || commentDepth > 0)) {
+    } else if (char === '\\' && (quoted || commentDepth > 0)) {
       escaped = true;
     } else if (commentDepth > 0) {
-      if (char === "(") commentDepth++;
-      else if (char === ")") commentDepth--;
+      if (char === '(') {
+        commentDepth++;
+      } else if (char === ')') {
+        commentDepth--;
+      }
     } else if (char === '"') {
       quoted = !quoted;
     } else if (!quoted) {
-      if (char === "(") commentDepth++;
-      else if (char === ",") {
+      if (char === '(') {
+        commentDepth++;
+      } else if (char === ',') {
         entries.push(raw.slice(start, i).trim());
         start = i + 1;
       }

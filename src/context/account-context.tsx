@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import { createContext, useContext, useEffect, useState } from "react";
-import { useQuery, useMutation, QueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
-import { accountsQuery, googleAccessTokenQuery } from "@/lib/accounts";
-import { resetGoogleAccountId } from "@/lib/auth";
-import type { Account } from "@/types/account";
+import { createContext, useContext, useEffect, useState } from 'react';
+import { useQuery, useMutation, QueryClient } from '@tanstack/react-query';
+import { invoke } from '@tauri-apps/api/core';
+import { accountsQuery, googleAccessTokenQuery } from '@/lib/accounts';
+import { resetGoogleAccountId } from '@/lib/auth';
+import type { Account } from '@/types/account';
 
 interface AccountContextValue {
   accounts: Account[];
@@ -24,52 +24,52 @@ interface AccountContextValue {
 
 const AccountContext = createContext<AccountContextValue | null>(null);
 
-export function AccountProvider({ children, queryClient }: { children: React.ReactNode; queryClient: QueryClient }) {
+export function AccountProvider({
+  children,
+  queryClient,
+}: {
+  children: React.ReactNode;
+  queryClient: QueryClient;
+}) {
   const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
-  const {
-    data: accounts = [],
-    isLoading,
-    error: accountsError,
-    refetch,
-  } = useQuery(accountsQuery);
+  const { data: accounts = [], isLoading, error: accountsError, refetch } = useQuery(accountsQuery);
 
   // Load active account from localStorage on mount
   useEffect(() => {
-    if (isLoading) return;
-    const stored = localStorage.getItem("activeAccountId");
+    if (isLoading) {
+      return;
+    }
+    const stored = localStorage.getItem('activeAccountId');
     if (accounts.length === 0) {
       setActiveAccountId(null);
-      localStorage.removeItem("activeAccountId");
+      localStorage.removeItem('activeAccountId');
     } else if (stored && accounts.some((a) => a.id === stored)) {
       setActiveAccountId(stored);
     } else {
       // Default to first (default) account
       const defaultAcc = accounts.find((a) => a.is_default) ?? accounts[0];
       setActiveAccountId(defaultAcc.id);
-      localStorage.setItem("activeAccountId", defaultAcc.id);
+      localStorage.setItem('activeAccountId', defaultAcc.id);
     }
     setHydrated(true);
   }, [accounts, isLoading]);
 
   const activeAccount = accounts.find((a) => a.id === activeAccountId) ?? null;
 
-  const selectAccount = (id: string) => {
-    localStorage.setItem("activeAccountId", id);
+  function selectAccount(id: string) {
+    localStorage.setItem('activeAccountId', id);
     setActiveAccountId(id);
-  };
+  }
 
-  const cacheAddedAccount = (account: Account) => {
+  function cacheAddedAccount(account: Account) {
     queryClient.setQueryData<Account[]>(accountsQuery.queryKey, (current = []) => {
       const next = current.filter((item) => item.id !== account.id);
-      return [
-        ...next,
-        current.length === 0 ? { ...account, is_default: true } : account,
-      ];
+      return [...next, current.length === 0 ? { ...account, is_default: true } : account];
     });
     selectAccount(account.id);
-  };
+  }
 
   const switchAccount = useMutation({
     mutationFn: async (id: string) => {
@@ -80,19 +80,19 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
   });
 
   const addGoogleAccount = useMutation({
-    mutationFn: () => invoke<Account>("add_google_account", { display_name: undefined }),
+    mutationFn: () => invoke<Account>('add_google_account', { display_name: undefined }),
     onSuccess: async (account) => {
       resetGoogleAccountId();
       cacheAddedAccount(account);
-      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      await queryClient.invalidateQueries({ queryKey: ['accounts'] });
       // Fresh grant: any lists that failed under the old token can retry.
-      await queryClient.invalidateQueries({ queryKey: ["gmail", account.id] });
+      await queryClient.invalidateQueries({ queryKey: ['gmail', account.id] });
     },
   });
 
   const addICloudAccount = useMutation({
     mutationFn: (params: { email: string; appPassword: string }) =>
-      invoke<Account>("add_icloud_account", {
+      invoke<Account>('add_icloud_account', {
         email: params.email,
         app_password: params.appPassword,
         display_name: undefined,
@@ -103,14 +103,19 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
       }),
     onSuccess: async (account) => {
       cacheAddedAccount(account);
-      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      await queryClient.invalidateQueries({ queryKey: ['accounts'] });
     },
   });
 
   const removeAccount = useMutation({
-    mutationFn: (id: string) => invoke("remove_account", { account_id: id }),
+    mutationFn: (id: string) => invoke('remove_account', { account_id: id }),
     onSuccess: async (_, id) => {
       resetGoogleAccountId();
+      for (const provider of ['gmail', 'icloud', 'accounts']) {
+        const queryKey = [provider, id];
+        await queryClient.cancelQueries({ queryKey });
+        queryClient.removeQueries({ queryKey });
+      }
       const remaining = accounts.filter((a) => a.id !== id);
       queryClient.setQueryData<Account[]>(accountsQuery.queryKey, remaining);
       if (activeAccountId === id) {
@@ -119,25 +124,23 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
           selectAccount(next.id);
         } else {
           setActiveAccountId(null);
-          localStorage.removeItem("activeAccountId");
+          localStorage.removeItem('activeAccountId');
         }
       }
-      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      await queryClient.invalidateQueries({ queryKey: ['accounts'] });
     },
   });
 
   const setDefaultAccount = useMutation({
-    mutationFn: (id: string) => invoke("set_default_account", { account_id: id }),
+    mutationFn: (id: string) => invoke('set_default_account', { account_id: id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
     },
   });
 
-  const getGoogleAccessToken = (accountId: string) =>
-    // fetchQuery honours staleTime (50s) — getQueryData would keep returning
-    // a token past its ~55-minute expiry. The backend caches in memory, so a
-    // refetch is a hashmap lookup, not an OAuth round trip.
-    queryClient.fetchQuery(googleAccessTokenQuery(accountId));
+  function getGoogleAccessToken(accountId: string) {
+    return queryClient.fetchQuery(googleAccessTokenQuery(accountId));
+  }
 
   return (
     <AccountContext.Provider
@@ -149,7 +152,8 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
         accountsError,
         switchAccount: (id) => switchAccount.mutateAsync(id).then(() => {}),
         addGoogleAccount: () => addGoogleAccount.mutateAsync().then(() => {}),
-        addICloudAccount: (email, appPassword) => addICloudAccount.mutateAsync({ email, appPassword }).then(() => {}),
+        addICloudAccount: (email, appPassword) =>
+          addICloudAccount.mutateAsync({ email, appPassword }).then(() => {}),
         removeAccount: (id) => removeAccount.mutateAsync(id).then(() => {}),
         setDefaultAccount: (id) => setDefaultAccount.mutateAsync(id).then(() => {}),
         getGoogleAccessToken,
@@ -163,6 +167,8 @@ export function AccountProvider({ children, queryClient }: { children: React.Rea
 
 export function useAccount() {
   const ctx = useContext(AccountContext);
-  if (!ctx) throw new Error("useAccount must be used within AccountProvider");
+  if (!ctx) {
+    throw new Error('useAccount must be used within AccountProvider');
+  }
   return ctx;
 }

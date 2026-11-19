@@ -1,7 +1,7 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import type { Mail } from "@/components/mail/data";
-import { useAccount } from "@/context/AccountContext";
+import type { Mail } from '@/components/mail/data';
+import { useAccount } from '@/context/account-context';
 import {
   gmailAccountId,
   applyGmailActionToCache,
@@ -17,7 +17,7 @@ import {
   tagFolderId,
   trashMessage,
   type Tag,
-} from "@/lib/gmail";
+} from '@/lib/gmail';
 import {
   ICLOUD_FOLDER_NAMES,
   icloudDeleteMessage,
@@ -26,42 +26,31 @@ import {
   icloudMoveMessage,
   parseIcloudMailId,
   type IcloudMessageSummary,
-} from "@/lib/icloud";
-import {
-  isNetworkError,
-  queueGmailAction,
-  queueIcloudAction,
-} from "@/lib/offline";
+} from '@/lib/icloud';
+import { isNetworkError, queueGmailAction, queueIcloudAction } from '@/lib/offline';
 
-export type MailAction =
-  | "archive"
-  | "trash"
-  | "read"
-  | "unread"
-  | "delete"
-  | "junk"
-  | "notJunk";
+export type MailAction = 'archive' | 'trash' | 'read' | 'unread' | 'delete' | 'junk' | 'notJunk';
 
 // The junk verdict a view offers: report as junk, rescue from the junk
 // folder, or nothing at all (drafts are outgoing mail — no verdict applies).
-export type JunkAction = Extract<MailAction, "junk" | "notJunk"> | null;
+export type JunkAction = Extract<MailAction, 'junk' | 'notJunk'> | null;
 
 // How an action changes a folder's badge. The drafts badge counts all mail,
 // the others count unread mail.
 function countDelta(action: MailAction, folder: string, read: boolean): number {
-  if (folder === "drafts") {
-    return action === "read" || action === "unread" ? 0 : -1;
+  if (folder === 'drafts') {
+    return action === 'read' || action === 'unread' ? 0 : -1;
   }
   switch (action) {
-    case "read":
+    case 'read':
       return read ? 0 : -1;
-    case "unread":
+    case 'unread':
       return read ? 1 : 0;
-    case "archive":
-    case "trash":
-    case "delete":
-    case "junk":
-    case "notJunk":
+    case 'archive':
+    case 'trash':
+    case 'delete':
+    case 'junk':
+    case 'notJunk':
       return read ? 0 : -1;
   }
 }
@@ -80,7 +69,7 @@ export function useMailActions(onRemoved?: (id: string) => void) {
       if (ref && activeAccount) {
         try {
           switch (action) {
-            case "archive":
+            case 'archive':
               await icloudMoveMessage(
                 activeAccount.id,
                 ref.folder,
@@ -88,7 +77,7 @@ export function useMailActions(onRemoved?: (id: string) => void) {
                 ICLOUD_FOLDER_NAMES.archive,
               );
               return;
-            case "trash":
+            case 'trash':
               await icloudMoveMessage(
                 activeAccount.id,
                 ref.folder,
@@ -96,25 +85,15 @@ export function useMailActions(onRemoved?: (id: string) => void) {
                 ICLOUD_FOLDER_NAMES.trash,
               );
               return;
-            case "read":
-            case "unread":
-              await icloudMarkRead(
-                activeAccount.id,
-                ref.folder,
-                ref.uid,
-                action === "read",
-              );
+            case 'read':
+            case 'unread':
+              await icloudMarkRead(activeAccount.id, ref.folder, ref.uid, action === 'read');
               return;
-            case "junk":
-            case "notJunk":
-              await icloudMarkJunk(
-                activeAccount.id,
-                ref.folder,
-                ref.uid,
-                action === "junk",
-              );
+            case 'junk':
+            case 'notJunk':
+              await icloudMarkJunk(activeAccount.id, ref.folder, ref.uid, action === 'junk');
               return;
-            case "delete":
+            case 'delete':
               await icloudDeleteMessage(activeAccount.id, ref.folder, ref.uid);
               return;
           }
@@ -122,67 +101,64 @@ export function useMailActions(onRemoved?: (id: string) => void) {
           // Offline: journal the action (also updates the SQLite cache) and
           // keep the optimistic UI — it replays when connectivity returns.
           // Permanent deletes are never queued: too destructive to replay.
-          if (!isNetworkError(err) || action === "delete") throw err;
-          await queueIcloudAction(
-            activeAccount.id,
-            ref.folder,
-            ref.uid,
-            action,
-          );
+          if (!isNetworkError(err) || action === 'delete') {
+            throw err;
+          }
+          await queueIcloudAction(activeAccount.id, ref.folder, ref.uid, action);
           return;
         }
       }
       try {
         switch (action) {
-          case "archive":
+          case 'archive':
             await archiveMessage(id, accountId);
             return;
-          case "trash":
+          case 'trash':
             await trashMessage(id, accountId);
             return;
-          case "read":
+          case 'read':
             await markRead(id, accountId);
             return;
-          case "unread":
+          case 'unread':
             await markUnread(id, accountId);
             return;
-          case "junk":
+          case 'junk':
             await junkMessage(id, accountId);
             return;
-          case "notJunk":
+          case 'notJunk':
             await notJunkMessage(id, accountId);
             return;
-          case "delete":
+          case 'delete':
             await deleteMessage(id, accountId);
             return;
         }
       } catch (err) {
-        if (!isNetworkError(err) || action === "delete") throw err;
+        if (!isNetworkError(err) || action === 'delete') {
+          throw err;
+        }
         await queueGmailAction(id, action, accountId);
       }
     },
     onMutate: async ({ action, id }) => {
       const ref = parseIcloudMailId(id);
       if (ref && activeAccount) {
-        const listKey = ["icloud", activeAccount.id, "messages"];
+        const listKey = ['icloud', activeAccount.id, 'messages'];
         await queryClient.cancelQueries({ queryKey: listKey });
-        const icloudPrevious = queryClient.getQueriesData<
-          IcloudMessageSummary[]
-        >({ queryKey: listKey });
-        queryClient.setQueriesData<IcloudMessageSummary[]>(
-          { queryKey: listKey },
-          (old) =>
-            action === "read" || action === "unread"
-              ? old?.map((m) =>
-                  m.uid === ref.uid && m.folder === ref.folder
-                    ? { ...m, read: action === "read" }
-                    : m,
-                )
-              : old?.filter(
-                  (m) => !(m.uid === ref.uid && m.folder === ref.folder),
-                ),
+        const icloudPrevious = queryClient.getQueriesData<IcloudMessageSummary[]>({
+          queryKey: listKey,
+        });
+        queryClient.setQueriesData<IcloudMessageSummary[]>({ queryKey: listKey }, (old) =>
+          action === 'read' || action === 'unread'
+            ? old?.map((m) =>
+                m.uid === ref.uid && m.folder === ref.folder
+                  ? { ...m, read: action === 'read' }
+                  : m,
+              )
+            : old?.filter((m) => !(m.uid === ref.uid && m.folder === ref.folder)),
         );
-        if (action !== "read" && action !== "unread") onRemoved?.(id);
+        if (action !== 'read' && action !== 'unread') {
+          onRemoved?.(id);
+        }
         return {
           previous: undefined,
           previousCounts: undefined,
@@ -191,18 +167,18 @@ export function useMailActions(onRemoved?: (id: string) => void) {
       }
 
       await queryClient.cancelQueries({
-        queryKey: ["gmail", accountId, "list"],
+        queryKey: ['gmail', accountId, 'list'],
       });
       await queryClient.cancelQueries({
-        queryKey: ["gmail", accountId, "counts"],
+        queryKey: ['gmail', accountId, 'counts'],
       });
       const previous = queryClient.getQueriesData<Mail[]>({
-        queryKey: ["gmail", accountId, "list"],
+        queryKey: ['gmail', accountId, 'list'],
       });
       const previousCounts = queryClient.getQueryData<Record<string, number>>([
-        "gmail",
+        'gmail',
         accountId,
-        "counts",
+        'counts',
       ]);
 
       // Locate the mail and its folder before the list caches change, so the
@@ -218,75 +194,65 @@ export function useMailActions(onRemoved?: (id: string) => void) {
         }
       }
 
-      queryClient.setQueriesData<Mail[]>(
-        { queryKey: ["gmail", accountId, "list"] },
-        (old) =>
-          action === "read" || action === "unread"
-            ? old?.map((m) =>
-                m.id === id ? { ...m, read: action === "read" } : m,
-              )
-            : old?.filter((m) => m.id !== id),
+      queryClient.setQueriesData<Mail[]>({ queryKey: ['gmail', accountId, 'list'] }, (old) =>
+        action === 'read' || action === 'unread'
+          ? old?.map((m) => (m.id === id ? { ...m, read: action === 'read' } : m))
+          : old?.filter((m) => m.id !== id),
       );
 
       // Optimistic badge counts: drafts counts totals, inbox/junk count unread.
       if (folder && mail) {
         const delta = countDelta(action, folder, mail.read);
         if (delta !== 0) {
-          queryClient.setQueryData<Record<string, number>>(
-            ["gmail", accountId, "counts"],
-            (old) =>
-              old && folder in old
-                ? { ...old, [folder]: Math.max(0, old[folder] + delta) }
-                : old,
+          queryClient.setQueryData<Record<string, number>>(['gmail', accountId, 'counts'], (old) =>
+            old && folder in old ? { ...old, [folder]: Math.max(0, old[folder] + delta) } : old,
           );
         }
       }
 
-      if (action !== "read" && action !== "unread") onRemoved?.(id);
+      if (action !== 'read' && action !== 'unread') {
+        onRemoved?.(id);
+      }
       // Mirror the change into the local message store right away — durable
       // across restarts whether the server call succeeds now or replays later.
-      if (action === "delete") void removeGmailFromCache(id, accountId);
-      else void applyGmailActionToCache(id, action, accountId);
+      if (action === 'delete') {
+        void removeGmailFromCache(id, accountId);
+      } else {
+        void applyGmailActionToCache(id, action, accountId);
+      }
       return { previous, previousCounts, icloudPrevious: undefined };
     },
     onError: (_err, _vars, context) => {
-      context?.previous?.forEach(([key, data]) =>
-        queryClient.setQueryData(key, data),
-      );
-      context?.icloudPrevious?.forEach(([key, data]) =>
-        queryClient.setQueryData(key, data),
-      );
+      context?.previous?.forEach(([key, data]) => queryClient.setQueryData(key, data));
+      context?.icloudPrevious?.forEach(([key, data]) => queryClient.setQueryData(key, data));
       if (context?.previousCounts) {
-        queryClient.setQueryData(
-          ["gmail", accountId, "counts"],
-          context.previousCounts,
-        );
+        queryClient.setQueryData(['gmail', accountId, 'counts'], context.previousCounts);
       }
     },
     onSuccess: (_data, { action, id }) => {
       // Keep the pending-ops indicator fresh (the action may have queued).
-      queryClient.invalidateQueries({ queryKey: ["ops"] });
+      queryClient.invalidateQueries({ queryKey: ['ops'] });
       const ref = parseIcloudMailId(id);
       if (ref && activeAccount) {
         queryClient.invalidateQueries({
-          queryKey: ["icloud", activeAccount.id, "counts"],
+          queryKey: ['icloud', activeAccount.id, 'counts'],
         });
         // Reconcile the destination folder's list in the background.
-        if (action !== "read" && action !== "unread") {
+        if (action !== 'read' && action !== 'unread') {
           queryClient.invalidateQueries({
-            queryKey: ["icloud", activeAccount.id, "messages"],
+            queryKey: ['icloud', activeAccount.id, 'messages'],
           });
         }
         return;
       }
       queryClient.invalidateQueries({
-        queryKey: ["gmail", accountId, "counts"],
+        queryKey: ['gmail', accountId, 'counts'],
       });
       // Reconcile other folders (archive/trash destinations) in the background;
       // read/unread already left every list cache correct.
-      if (action !== "read" && action !== "unread") {
+      if (action !== 'read' && action !== 'unread') {
         queryClient.invalidateQueries({
-          queryKey: ["gmail", accountId, "list"],
+          queryKey: ['gmail', accountId, 'list'],
         });
       }
     },
@@ -312,35 +278,35 @@ export function useMoveToFolder() {
     mutationFn: async ({ id, target }: { id: string; target: string }) => {
       const ref = parseIcloudMailId(id);
       if (!ref || !activeAccount) {
-        throw new Error("moving to a folder requires an iCloud account");
+        throw new Error('moving to a folder requires an iCloud account');
       }
       await icloudMoveMessage(activeAccount.id, ref.folder, ref.uid, target);
     },
     onMutate: async ({ id }) => {
       const ref = parseIcloudMailId(id);
-      if (!ref || !activeAccount) return { previous: undefined };
-      const listKey = ["icloud", activeAccount.id, "messages"];
+      if (!ref || !activeAccount) {
+        return { previous: undefined };
+      }
+      const listKey = ['icloud', activeAccount.id, 'messages'];
       await queryClient.cancelQueries({ queryKey: listKey });
       const previous = queryClient.getQueriesData<IcloudMessageSummary[]>({
         queryKey: listKey,
       });
-      queryClient.setQueriesData<IcloudMessageSummary[]>(
-        { queryKey: listKey },
-        (old) =>
-          old?.filter((m) => !(m.uid === ref.uid && m.folder === ref.folder)),
+      queryClient.setQueriesData<IcloudMessageSummary[]>({ queryKey: listKey }, (old) =>
+        old?.filter((m) => !(m.uid === ref.uid && m.folder === ref.folder)),
       );
       return { previous };
     },
     onError: (_err, _vars, context) => {
-      context?.previous?.forEach(([key, data]) =>
-        queryClient.setQueryData(key, data),
-      );
+      context?.previous?.forEach(([key, data]) => queryClient.setQueryData(key, data));
     },
     onSuccess: () => {
-      if (!activeAccount) return;
+      if (!activeAccount) {
+        return;
+      }
       // Reconcile the destination folder's list and the badge counts.
       queryClient.invalidateQueries({
-        queryKey: ["icloud", activeAccount.id],
+        queryKey: ['icloud', activeAccount.id],
       });
     },
   });
@@ -379,21 +345,18 @@ export function useTagActions() {
     mutationFn: ({ id, tag, on }: { id: string; tag: Tag; on: boolean }) =>
       setMessageTag(id, tag.id, on, accountId),
     onMutate: async ({ id, tag, on }) => {
-      void applyGmailLabelChange(
-        id,
-        on ? [tag.id] : [],
-        on ? [] : [tag.id],
-        accountId,
-      );
+      void applyGmailLabelChange(id, on ? [tag.id] : [], on ? [] : [tag.id], accountId);
       await queryClient.cancelQueries({
-        queryKey: ["gmail", accountId, "list"],
+        queryKey: ['gmail', accountId, 'list'],
       });
       const previous = queryClient.getQueriesData<Mail[]>({
-        queryKey: ["gmail", accountId, "list"],
+        queryKey: ['gmail', accountId, 'list'],
       });
       const apply = on ? addTagToMail : removeTagFromMail;
       for (const [key, mails] of previous) {
-        if (!mails) continue;
+        if (!mails) {
+          continue;
+        }
         // Untagging while that tag's folder is open removes the mail from it.
         if (!on && key[3] === tagFolderId(tag.id)) {
           queryClient.setQueryData(
@@ -410,18 +373,15 @@ export function useTagActions() {
       return { previous };
     },
     onError: (_err, _vars, context) => {
-      context?.previous?.forEach(([key, data]) =>
-        queryClient.setQueryData(key, data),
-      );
+      context?.previous?.forEach(([key, data]) => queryClient.setQueryData(key, data));
     },
     onSuccess: () => {
       // Reconcile tag folder lists (newly tagged mail appears there).
-      queryClient.invalidateQueries({ queryKey: ["gmail", accountId, "list"] });
+      queryClient.invalidateQueries({ queryKey: ['gmail', accountId, 'list'] });
     },
   });
 
   return {
-    toggle: (id: string, tag: Tag, on: boolean) =>
-      mutation.mutate({ id, tag, on }),
+    toggle: (id: string, tag: Tag, on: boolean) => mutation.mutate({ id, tag, on }),
   };
 }

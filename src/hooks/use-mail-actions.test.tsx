@@ -1,11 +1,11 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 
-import { useMailActions } from "@/hooks/use-mail-actions";
-import type { Mail } from "@/components/mail/data";
-import { mail } from "@/test/fixtures";
+import { useMailActions } from '@/hooks/use-mail-actions';
+import type { Mail } from '@/components/mail/data';
+import { mail } from '@/test/fixtures';
 
 const gmailApi = vi.hoisted(() => ({
   markRead: vi.fn(),
@@ -24,35 +24,35 @@ const queue = vi.hoisted(() => ({
   queueIcloudAction: vi.fn(),
 }));
 
-vi.mock("@/lib/gmail", async (importOriginal) => ({
+vi.mock('@/lib/gmail', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   ...gmailApi,
 }));
 
-vi.mock("@/lib/offline", async (importOriginal) => ({
+vi.mock('@/lib/offline', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   ...queue,
 }));
 
-vi.mock("@/context/AccountContext", () => ({
+vi.mock('@/context/account-context', () => ({
   useAccount: () => ({
     accounts: [],
-    activeAccount: { id: "g1", kind: "google", email: "me@gmail.com" },
-    activeAccountId: "g1",
+    activeAccount: { id: 'g1', kind: 'google', email: 'me@gmail.com' },
+    activeAccountId: 'g1',
   }),
 }));
 
-const LIST_KEY = ["gmail", "g1", "list", "inbox", ""];
+const LIST_KEY = ['gmail', 'g1', 'list', 'inbox', ''];
 
 function setup(onRemoved?: (id: string) => void) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   });
   client.setQueryData<Mail[]>(LIST_KEY, [
-    mail({ id: "m1", read: false }),
-    mail({ id: "m2", read: true, name: "Bob" }),
+    mail({ id: 'm1', read: false }),
+    mail({ id: 'm2', read: true, name: 'Bob' }),
   ]);
-  client.setQueryData(["gmail", "g1", "counts"], { inbox: 1 });
+  client.setQueryData(['gmail', 'g1', 'counts'], { inbox: 1 });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
@@ -65,172 +65,128 @@ beforeEach(() => {
   Object.values(gmailApi).forEach((fn) => fn.mockResolvedValue(undefined));
 });
 
-describe("useMailActions (Gmail)", () => {
-  it("marks read optimistically and calls the API", async () => {
+describe('useMailActions (Gmail)', () => {
+  it('marks read optimistically and calls the API', async () => {
     const { client, result } = setup();
-    result.current.act("read", "m1");
+    result.current.act('read', 'm1');
 
     // Optimistic: the cached list flips before the network resolves.
     await waitFor(() => {
       expect(client.getQueryData<Mail[]>(LIST_KEY)![0].read).toBe(true);
     });
-    await waitFor(() =>
-      expect(gmailApi.markRead).toHaveBeenCalledWith("m1", "g1"),
-    );
+    await waitFor(() => expect(gmailApi.markRead).toHaveBeenCalledWith('m1', 'g1'));
     // Unread badge decremented optimistically.
-    expect(client.getQueryData(["gmail", "g1", "counts"])).toEqual({
+    expect(client.getQueryData(['gmail', 'g1', 'counts'])).toEqual({
       inbox: 0,
     });
   });
 
-  it("archive removes the mail from the list and reports removal", async () => {
+  it('archive removes the mail from the list and reports removal', async () => {
     const removed = vi.fn();
     const { client, result } = setup(removed);
-    result.current.act("archive", "m1");
+    result.current.act('archive', 'm1');
 
     await waitFor(() => {
-      expect(client.getQueryData<Mail[]>(LIST_KEY)!.map((m) => m.id)).toEqual([
-        "m2",
-      ]);
+      expect(client.getQueryData<Mail[]>(LIST_KEY)!.map((m) => m.id)).toEqual(['m2']);
     });
-    expect(removed).toHaveBeenCalledWith("m1");
-    await waitFor(() =>
-      expect(gmailApi.archiveMessage).toHaveBeenCalledWith("m1", "g1"),
-    );
+    expect(removed).toHaveBeenCalledWith('m1');
+    await waitFor(() => expect(gmailApi.archiveMessage).toHaveBeenCalledWith('m1', 'g1'));
   });
 
-  it("rolls the cache back when the server rejects", async () => {
-    gmailApi.trashMessage.mockRejectedValue(new Error("Google API 400: boom"));
+  it('rolls the cache back when the server rejects', async () => {
+    gmailApi.trashMessage.mockRejectedValue(new Error('Google API 400: boom'));
     const { client, result } = setup();
-    result.current.act("trash", "m2");
+    result.current.act('trash', 'm2');
 
     // The optimistic removal is rolled back once the server rejects.
-    await waitFor(() =>
-      expect(gmailApi.trashMessage).toHaveBeenCalledWith("m2", "g1"),
-    );
+    await waitFor(() => expect(gmailApi.trashMessage).toHaveBeenCalledWith('m2', 'g1'));
     await waitFor(() => {
       expect(client.getQueryData<Mail[]>(LIST_KEY)).toHaveLength(2);
     });
     expect(queue.queueGmailAction).not.toHaveBeenCalled();
   });
 
-  it("queues rate-limited actions instead of failing", async () => {
-    gmailApi.archiveMessage.mockRejectedValue(
-      new Error("Google API 429: quota exceeded"),
-    );
+  it('queues rate-limited actions instead of failing', async () => {
+    gmailApi.archiveMessage.mockRejectedValue(new Error('Google API 429: quota exceeded'));
     const { result } = setup();
-    result.current.act("archive", "m1");
+    result.current.act('archive', 'm1');
 
-    await waitFor(() =>
-      expect(queue.queueGmailAction).toHaveBeenCalledWith(
-        "m1",
-        "archive",
-        "g1",
-      ),
-    );
+    await waitFor(() => expect(queue.queueGmailAction).toHaveBeenCalledWith('m1', 'archive', 'g1'));
   });
 
-  it("queues transient server errors instead of failing", async () => {
-    gmailApi.archiveMessage.mockRejectedValue(
-      new Error("Google API 503: service unavailable"),
-    );
+  it('queues transient server errors instead of failing', async () => {
+    gmailApi.archiveMessage.mockRejectedValue(new Error('Google API 503: service unavailable'));
     const { result } = setup();
-    result.current.act("archive", "m1");
+    result.current.act('archive', 'm1');
 
-    await waitFor(() =>
-      expect(queue.queueGmailAction).toHaveBeenCalledWith(
-        "m1",
-        "archive",
-        "g1",
-      ),
-    );
+    await waitFor(() => expect(queue.queueGmailAction).toHaveBeenCalledWith('m1', 'archive', 'g1'));
   });
 
-  it("surfaces revoked-token errors without queuing them", async () => {
+  it('surfaces revoked-token errors without queuing them', async () => {
     gmailApi.markRead.mockRejectedValue(
-      new Error("token endpoint returned 400 Bad Request: invalid_grant"),
+      new Error('token endpoint returned 400 Bad Request: invalid_grant'),
     );
     const { result } = setup();
-    result.current.act("read", "m1");
+    result.current.act('read', 'm1');
 
     await waitFor(() => expect(result.current.error).toBeTruthy());
-    expect(result.current.error?.message).toContain("invalid_grant");
+    expect(result.current.error?.message).toContain('invalid_grant');
     expect(queue.queueGmailAction).not.toHaveBeenCalled();
   });
 
-  it("queues recoverable actions when the network is down", async () => {
-    gmailApi.archiveMessage.mockRejectedValue(
-      new Error("error sending request to https://gmail"),
-    );
+  it('queues recoverable actions when the network is down', async () => {
+    gmailApi.archiveMessage.mockRejectedValue(new Error('error sending request to https://gmail'));
     const { result } = setup();
-    result.current.act("archive", "m1");
+    result.current.act('archive', 'm1');
 
-    await waitFor(() =>
-      expect(queue.queueGmailAction).toHaveBeenCalledWith(
-        "m1",
-        "archive",
-        "g1",
-      ),
-    );
+    await waitFor(() => expect(queue.queueGmailAction).toHaveBeenCalledWith('m1', 'archive', 'g1'));
   });
 
-  it("junk removes the mail from the list and mirrors to the cache", async () => {
+  it('junk removes the mail from the list and mirrors to the cache', async () => {
     const removed = vi.fn();
     const { client, result } = setup(removed);
-    result.current.act("junk", "m1");
+    result.current.act('junk', 'm1');
 
     await waitFor(() => {
-      expect(client.getQueryData<Mail[]>(LIST_KEY)!.map((m) => m.id)).toEqual([
-        "m2",
-      ]);
+      expect(client.getQueryData<Mail[]>(LIST_KEY)!.map((m) => m.id)).toEqual(['m2']);
     });
-    expect(removed).toHaveBeenCalledWith("m1");
-    await waitFor(() =>
-      expect(gmailApi.junkMessage).toHaveBeenCalledWith("m1", "g1"),
-    );
-    expect(gmailApi.applyGmailActionToCache).toHaveBeenCalledWith(
-      "m1",
-      "junk",
-      "g1",
-    );
+    expect(removed).toHaveBeenCalledWith('m1');
+    await waitFor(() => expect(gmailApi.junkMessage).toHaveBeenCalledWith('m1', 'g1'));
+    expect(gmailApi.applyGmailActionToCache).toHaveBeenCalledWith('m1', 'junk', 'g1');
   });
 
-  it("not junk calls the SPAM-removal API", async () => {
+  it('not junk calls the SPAM-removal API', async () => {
     const { result } = setup();
-    result.current.act("notJunk", "m2");
+    result.current.act('notJunk', 'm2');
 
-    await waitFor(() =>
-      expect(gmailApi.notJunkMessage).toHaveBeenCalledWith("m2", "g1"),
-    );
+    await waitFor(() => expect(gmailApi.notJunkMessage).toHaveBeenCalledWith('m2', 'g1'));
   });
 
-  it("never queues permanent deletes offline", async () => {
-    gmailApi.deleteMessage.mockRejectedValue(
-      new Error("error sending request to https://gmail"),
-    );
+  it('never queues permanent deletes offline', async () => {
+    gmailApi.deleteMessage.mockRejectedValue(new Error('error sending request to https://gmail'));
     const { client, result } = setup();
-    result.current.act("delete", "m1");
+    result.current.act('delete', 'm1');
 
     // Failed delete: not journaled, and the optimistic removal rolls back.
     await waitFor(() => {
       expect(client.getQueryData<Mail[]>(LIST_KEY)).toHaveLength(2);
     });
     expect(queue.queueGmailAction).not.toHaveBeenCalled();
-    expect(gmailApi.removeGmailFromCache).toHaveBeenCalledWith("m1", "g1");
+    expect(gmailApi.removeGmailFromCache).toHaveBeenCalledWith('m1', 'g1');
   });
 });
 
-describe("account-scoped optimistic updates", () => {
-  it("leaves another account with the same message id untouched on failure", async () => {
+describe('account-scoped optimistic updates', () => {
+  it('leaves another account with the same message id untouched on failure', async () => {
     const { client, result } = setup();
-    const otherKey = ["gmail", "g2", "list", "inbox", ""];
+    const otherKey = ['gmail', 'g2', 'list', 'inbox', ''];
     const otherMail = mail({
-      id: "m1",
-      subject: "Another account",
+      id: 'm1',
+      subject: 'Another account',
       read: false,
     });
     client.setQueryData(otherKey, [otherMail]);
-    client.setQueryData(["gmail", "g2", "counts"], { inbox: 8 });
+    client.setQueryData(['gmail', 'g2', 'counts'], { inbox: 8 });
     let reject!: (error: Error) => void;
     gmailApi.archiveMessage.mockImplementation(
       () =>
@@ -238,16 +194,14 @@ describe("account-scoped optimistic updates", () => {
           reject = fail;
         }),
     );
-    result.current.act("archive", "m1");
-    await waitFor(() =>
-      expect(client.getQueryData<Mail[]>(LIST_KEY)).toHaveLength(1),
-    );
+    result.current.act('archive', 'm1');
+    await waitFor(() => expect(client.getQueryData<Mail[]>(LIST_KEY)).toHaveLength(1));
     expect(client.getQueryData(otherKey)).toEqual([otherMail]);
-    reject(new Error("Google API 400: rejected"));
+    reject(new Error('Google API 400: rejected'));
     await waitFor(() => expect(result.current.error).toBeTruthy());
     expect(client.getQueryData<Mail[]>(LIST_KEY)).toHaveLength(2);
     expect(client.getQueryData(otherKey)).toEqual([otherMail]);
-    expect(client.getQueryData(["gmail", "g2", "counts"])).toEqual({
+    expect(client.getQueryData(['gmail', 'g2', 'counts'])).toEqual({
       inbox: 8,
     });
     expect(client.getQueryState(otherKey)?.isInvalidated).toBe(false);

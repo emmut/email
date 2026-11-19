@@ -1,25 +1,25 @@
-import type { ReactNode } from "react";
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { invoke } from "@tauri-apps/api/core";
+import type { ReactNode } from 'react';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
 
-import { AccountProvider, useAccount } from "@/context/AccountContext";
-import type { Account } from "@/types/account";
+import { AccountProvider, useAccount } from '@/context/account-context';
+import type { Account } from '@/types/account';
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ resetGoogleAccountId: vi.fn() }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+vi.mock('@/lib/auth', () => ({ resetGoogleAccountId: vi.fn() }));
 
 const mockInvoke = vi.mocked(invoke);
 
 const googleAccount: Account = {
-  id: "google-1",
-  kind: "google",
-  email: "me@example.com",
+  id: 'google-1',
+  kind: 'google',
+  email: 'me@example.com',
   display_name: null,
   avatar_url: null,
-  created_at: "2026-01-01T00:00:00Z",
-  updated_at: "2026-01-01T00:00:00Z",
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
   last_synced_at: null,
   is_default: true,
 };
@@ -29,12 +29,12 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-describe("AccountProvider onboarding", () => {
-  it("selects a newly connected account before onboarding completes", async () => {
+describe('AccountProvider onboarding', () => {
+  it('selects a newly connected account before onboarding completes', async () => {
     let accounts: Account[] = [];
     mockInvoke.mockImplementation(async (command) => {
-      if (command === "list_accounts") return accounts;
-      if (command === "add_google_account") {
+      if (command === 'list_accounts') return accounts;
+      if (command === 'add_google_account') {
         accounts = [googleAccount];
         return googleAccount;
       }
@@ -60,14 +60,14 @@ describe("AccountProvider onboarding", () => {
     await act(() => result.current.addGoogleAccount());
 
     expect(result.current.activeAccount).toEqual(googleAccount);
-    expect(localStorage.getItem("activeAccountId")).toBe(googleAccount.id);
+    expect(localStorage.getItem('activeAccountId')).toBe(googleAccount.id);
   });
 
-  it("returns to the no-account state after removing the final account", async () => {
+  it('returns to the no-account state after removing the final account', async () => {
     let accounts: Account[] = [googleAccount];
     mockInvoke.mockImplementation(async (command) => {
-      if (command === "list_accounts") return accounts;
-      if (command === "remove_account") {
+      if (command === 'list_accounts') return accounts;
+      if (command === 'remove_account') {
         accounts = [];
         return;
       }
@@ -87,47 +87,52 @@ describe("AccountProvider onboarding", () => {
     );
     const { result } = renderHook(useAccount, { wrapper });
 
-    await waitFor(() =>
-      expect(result.current.activeAccount?.id).toBe(googleAccount.id),
-    );
+    await waitFor(() => expect(result.current.activeAccount?.id).toBe(googleAccount.id));
+    const removedMailKey = ['gmail', googleAccount.id, 'list'];
+    const removedTokenKey = ['accounts', googleAccount.id, 'google_access_token'];
+    const otherAccountKey = ['gmail', 'another-account', 'list'];
+    client.setQueryData(removedMailKey, ['private mail']);
+    client.setQueryData(removedTokenKey, 'bearer-token');
+    client.setQueryData(otherAccountKey, ['other mail']);
     await act(() => result.current.removeAccount(googleAccount.id));
+    expect(client.getQueryData(removedMailKey)).toBeUndefined();
+    expect(client.getQueryData(removedTokenKey)).toBeUndefined();
+    expect(client.getQueryData(otherAccountKey)).toEqual(['other mail']);
 
     expect(result.current.accounts).toEqual([]);
     expect(result.current.activeAccount).toBeNull();
-    expect(localStorage.getItem("activeAccountId")).toBeNull();
+    expect(localStorage.getItem('activeAccountId')).toBeNull();
   });
 });
 
-describe("switching accounts", () => {
-  it("reuses fresh account caches without invalidating either provider", async () => {
-    const second = { ...googleAccount, id: "google-2", is_default: false };
+describe('switching accounts', () => {
+  it('reuses fresh account caches without invalidating either provider', async () => {
+    const second = { ...googleAccount, id: 'google-2', is_default: false };
     mockInvoke.mockResolvedValue([googleAccount, second]);
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
-    const aKey = ["gmail", googleAccount.id, "list", "inbox", ""];
-    const bKey = ["gmail", second.id, "list", "inbox", ""];
-    const iKey = ["icloud", "apple", "messages", "INBOX"];
-    client.setQueryData(aKey, ["A mail"]);
-    client.setQueryData(bKey, ["B mail"]);
-    client.setQueryData(iKey, ["iCloud mail"]);
-    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const aKey = ['gmail', googleAccount.id, 'list', 'inbox', ''];
+    const bKey = ['gmail', second.id, 'list', 'inbox', ''];
+    const iKey = ['icloud', 'apple', 'messages', 'INBOX'];
+    client.setQueryData(aKey, ['A mail']);
+    client.setQueryData(bKey, ['B mail']);
+    client.setQueryData(iKey, ['iCloud mail']);
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>
         <AccountProvider queryClient={client}>{children}</AccountProvider>
       </QueryClientProvider>
     );
     const { result } = renderHook(useAccount, { wrapper });
-    await waitFor(() =>
-      expect(result.current.activeAccount?.id).toBe(googleAccount.id),
-    );
+    await waitFor(() => expect(result.current.activeAccount?.id).toBe(googleAccount.id));
     await act(() => result.current.switchAccount(second.id));
     expect(result.current.activeAccount?.id).toBe(second.id);
     await act(() => result.current.switchAccount(googleAccount.id));
     expect(result.current.activeAccount?.id).toBe(googleAccount.id);
     expect(invalidate).not.toHaveBeenCalled();
-    expect(client.getQueryData(aKey)).toEqual(["A mail"]);
-    expect(client.getQueryData(bKey)).toEqual(["B mail"]);
+    expect(client.getQueryData(aKey)).toEqual(['A mail']);
+    expect(client.getQueryData(bKey)).toEqual(['B mail']);
     expect(client.getQueryState(iKey)?.isInvalidated).toBe(false);
   });
 });

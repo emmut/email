@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Check,
@@ -8,27 +8,22 @@ import {
   Inbox,
   LoaderCircle,
   LockKeyhole,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { useAccount } from "@/context/AccountContext";
-import { cn, isMac } from "@/lib/utils";
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useAccount } from '@/context/account-context';
+import { cn, isMac } from '@/lib/utils';
 
 function errorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/^Error:\s*/i, "");
+  return message.replace(/^Error:\s*/i, '');
 }
 
 export function SignIn() {
-  const {
-    addGoogleAccount,
-    addICloudAccount,
-    accountsError,
-    refetch,
-  } = useAccount();
+  const { addGoogleAccount, addICloudAccount, accountsError, refetch } = useAccount();
   const [showICloud, setShowICloud] = useState(false);
-  const [icloudEmail, setIcloudEmail] = useState("");
-  const [icloudPassword, setIcloudPassword] = useState("");
+  const [icloudEmail, setIcloudEmail] = useState('');
+  const [icloudPassword, setIcloudPassword] = useState('');
 
   const googleMutation = useMutation({ mutationFn: addGoogleAccount });
   const icloudMutation = useMutation({
@@ -38,12 +33,7 @@ export function SignIn() {
   const error = googleMutation.error ?? icloudMutation.error;
 
   return (
-    <main
-      className={cn(
-        "bg-muted/30 flex h-svh overflow-y-auto p-6",
-        isMac && "pt-12",
-      )}
-    >
+    <main className={cn('bg-muted/30 flex h-svh overflow-y-auto p-6', isMac && 'pt-12')}>
       <div data-tauri-drag-region className="fixed inset-x-0 top-0 h-8" />
       <div className="mx-auto my-auto grid w-full max-w-4xl overflow-hidden rounded-2xl border bg-background shadow-sm md:grid-cols-[1.05fr_0.95fr]">
         <section className="border-b bg-muted/40 p-8 md:border-r md:border-b-0 md:p-10">
@@ -58,8 +48,8 @@ export function SignIn() {
               Your inbox, without the browser.
             </h1>
             <p className="text-muted-foreground mt-3 text-sm leading-6">
-              Connect an account to read, write, and organize your mail from
-              one focused desktop app.
+              Connect an account to read, write, and organize your mail from one focused desktop
+              app.
             </p>
           </div>
           <ul className="mt-8 grid gap-3 text-sm">
@@ -82,17 +72,13 @@ export function SignIn() {
           {accountsError ? (
             <div className="flex flex-col items-start gap-4" role="alert">
               <div>
-                <h2 className="text-lg font-semibold">
-                  We couldn&apos;t load your accounts
-                </h2>
+                <h2 className="text-lg font-semibold">We couldn&apos;t load your accounts</h2>
                 <p className="text-muted-foreground mt-1 text-sm leading-6">
-                  Your account data is still on this computer. Try loading it
-                  again before connecting a new account.
+                  Your account data is still on this computer. Try loading it again before
+                  connecting a new account.
                 </p>
               </div>
-              <p className="text-destructive text-sm">
-                {errorMessage(accountsError)}
-              </p>
+              <p className="text-destructive text-sm">{errorMessage(accountsError)}</p>
               <Button onClick={() => void refetch()}>Try again</Button>
             </div>
           ) : showICloud ? (
@@ -130,8 +116,8 @@ export function SignIn() {
                   )}
                   <span className="flex-1 text-left">
                     {googleMutation.isPending
-                      ? "Finish signing in in your browser…"
-                      : "Continue with Google"}
+                      ? 'Finish signing in in your browser…'
+                      : 'Continue with Google'}
                   </span>
                 </Button>
                 <Button
@@ -149,8 +135,8 @@ export function SignIn() {
                 </Button>
               </div>
               <p className="text-muted-foreground mt-5 text-xs leading-5">
-                Email only requests the access it needs to manage mail. You can
-                remove an account at any time in Settings.
+                Email only requests the access it needs to manage mail. You can remove an account at
+                any time in Settings.
               </p>
             </div>
           )}
@@ -200,14 +186,15 @@ function ICloudForm({
       </Button>
       <h2 className="text-lg font-semibold">Connect iCloud Mail</h2>
       <p className="text-muted-foreground mt-1 text-sm leading-6">
-        Apple requires an app-specific password instead of your Apple Account
-        password.
+        Apple requires an app-specific password instead of your Apple Account password.
       </p>
       <form
         className="mt-5 flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault();
-          if (email.trim() && password) onSubmit();
+          if (email.trim() && password) {
+            onSubmit();
+          }
         }}
       >
         <label className="grid gap-1.5 text-sm font-medium">
@@ -240,13 +227,9 @@ function ICloudForm({
           Create a password at account.apple.com
           <ExternalLink className="size-3" />
         </a>
-        <Button
-          size="lg"
-          type="submit"
-          disabled={isPending || !email.trim() || !password}
-        >
+        <Button size="lg" type="submit" disabled={isPending || !email.trim() || !password}>
           {isPending && <LoaderCircle className="animate-spin" />}
-          {isPending ? "Checking your account…" : "Connect iCloud Mail"}
+          {isPending ? 'Checking your account…' : 'Connect iCloud Mail'}
         </Button>
       </form>
     </div>

@@ -1,6 +1,6 @@
 export interface Account {
   id: string;
-  kind: "google" | "icloud";
+  kind: 'google' | 'icloud';
   email: string;
   display_name: string | null;
   avatar_url: string | null;
@@ -25,4 +25,5 @@ export interface IcloudAccountConfig {
   smtp_port: number;
 }
 
-export type AccountConfig = { kind: "google" } & GoogleAccountConfig | { kind: "icloud" } & IcloudAccountConfig;
+export type AccountConfig =
+  ({ kind: 'google' } & GoogleAccountConfig) | ({ kind: 'icloud' } & IcloudAccountConfig);

@@ -4,16 +4,16 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { useSettings } from "@/lib/settings";
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { useSettings } from '@/lib/settings';
 
 const SYNC_CHOICES: { minutes: number; label: string }[] = [
-  { minutes: 0.5, label: "Every 30 seconds" },
-  { minutes: 1, label: "Every minute" },
-  { minutes: 5, label: "Every 5 minutes" },
-  { minutes: 15, label: "Every 15 minutes" },
-  { minutes: 0, label: "Manually" },
+  { minutes: 0.5, label: 'Every 30 seconds' },
+  { minutes: 1, label: 'Every minute' },
+  { minutes: 5, label: 'Every 5 minutes' },
+  { minutes: 15, label: 'Every 15 minutes' },
+  { minutes: 0, label: 'Manually' },
 ];
 
 function Row({
@@ -41,15 +41,10 @@ export function GeneralSection() {
 
   return (
     <div className="flex flex-col divide-y">
-      <Row
-        title="Check for new mail"
-        description="How often the app syncs with the mail server."
-      >
+      <Row title="Check for new mail" description="How often the app syncs with the mail server.">
         <Select
           value={String(settings.syncIntervalMinutes)}
-          onValueChange={(v) =>
-            v !== null && update({ syncIntervalMinutes: Number(v) })
-          }
+          onValueChange={(v) => v !== null && update({ syncIntervalMinutes: Number(v) })}
           items={SYNC_CHOICES.map((c) => ({
             value: String(c.minutes),
             label: c.label,
@@ -88,9 +83,7 @@ export function GeneralSection() {
         />
       </Row>
       {saveError != null && (
-        <p className="text-destructive pt-3 text-xs">
-          Could not save: {String(saveError)}
-        </p>
+        <p className="text-destructive pt-3 text-xs">Could not save: {String(saveError)}</p>
       )}
     </div>
   );

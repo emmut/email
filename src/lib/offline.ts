@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { queryOptions, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { queryOptions, useQueryClient } from '@tanstack/react-query';
 
 import {
   gmailAccountId,
@@ -12,26 +12,20 @@ import {
   sendMessage,
   trashMessage,
   type OutgoingMail,
-} from "@/lib/gmail";
+} from '@/lib/gmail';
 import {
   ICLOUD_FOLDER_NAMES,
   icloudMarkJunk,
   icloudMarkRead,
   icloudMoveMessage,
   icloudSendMessage,
-} from "@/lib/icloud";
+} from '@/lib/icloud';
 
 // Offline write queue. Actions taken while offline are journaled in SQLite
 // (pending_ops), applied to the local cache immediately, and replayed against
 // the provider when connectivity returns. Replay order = enqueue order.
 
-type MailActionKind =
-  | "archive"
-  | "trash"
-  | "read"
-  | "unread"
-  | "junk"
-  | "notJunk";
+type MailActionKind = 'archive' | 'trash' | 'read' | 'unread' | 'junk' | 'notJunk';
 
 interface PendingOp {
   id: number;
@@ -47,8 +41,8 @@ const MAX_ATTEMPTS = 10;
 
 // Number of queued offline actions — drives the sidebar indicator.
 export const pendingOpsQuery = queryOptions({
-  queryKey: ["ops"],
-  queryFn: () => invoke<PendingOp[]>("ops_list"),
+  queryKey: ['ops'],
+  queryFn: () => invoke<PendingOp[]>('ops_list'),
   refetchInterval: 15_000,
   staleTime: 5_000,
 });
@@ -57,13 +51,17 @@ export const pendingOpsQuery = queryOptions({
 export function useOnline(): boolean {
   const [online, setOnline] = useState(() => navigator.onLine);
   useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
+    function on() {
+      return setOnline(true);
+    }
+    function off() {
+      return setOnline(false);
+    }
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
     return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
     };
   }, []);
   return online;
@@ -75,17 +73,21 @@ export function useOnline(): boolean {
 /// modify calls (e.g. marking a read mail in rapid triage), and failing a
 /// whole action over that is worse than letting the queue replay it.
 export function isNetworkError(err: unknown): boolean {
-  if (typeof navigator !== "undefined" && !navigator.onLine) return true;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return true;
+  }
   const msg = err instanceof Error ? err.message : String(err);
-  if (/^Google API (429|5\d\d)/.test(msg)) return true;
-  if (/^Google API \d/.test(msg)) return false; // HTTP response = server reached
-  return /connect|connection|network|timed? ?out|dns|unreachable|error sending request/i.test(
-    msg,
-  );
+  if (/^Google API (429|5\d\d)/.test(msg)) {
+    return true;
+  }
+  if (/^Google API \d/.test(msg)) {
+    return false;
+  } // HTTP response = server reached
+  return /connect|connection|network|timed? ?out|dns|unreachable|error sending request/i.test(msg);
 }
 
 function enqueueOp(kind: string, payload: unknown) {
-  return invoke<number>("ops_enqueue", {
+  return invoke<number>('ops_enqueue', {
     kind,
     payload: JSON.stringify(payload),
   });
@@ -99,11 +101,8 @@ export async function queueGmailAction(
   await enqueueOp(`gmail:${action}`, { id, accountId });
 }
 
-export async function queueGmailSend(
-  msg: OutgoingMail,
-  accountId = gmailAccountId(),
-) {
-  await enqueueOp("gmail:send", { ...msg, accountId });
+export async function queueGmailSend(msg: OutgoingMail, accountId = gmailAccountId()) {
+  await enqueueOp('gmail:send', { ...msg, accountId });
 }
 
 export interface IcloudSendPayload {
@@ -120,7 +119,7 @@ export interface IcloudSendPayload {
 }
 
 export async function queueIcloudSend(params: IcloudSendPayload) {
-  await enqueueOp("icloud:send", params);
+  await enqueueOp('icloud:send', params);
 }
 
 // Queue the op AND update the SQLite message cache so the optimistic state
@@ -131,29 +130,29 @@ export async function queueIcloudAction(
   uid: number,
   action: MailActionKind,
 ) {
-  if (action === "read" || action === "unread") {
-    await enqueueOp("icloud:read", {
+  if (action === 'read' || action === 'unread') {
+    await enqueueOp('icloud:read', {
       accountId,
       folder,
       uid,
-      read: action === "read",
+      read: action === 'read',
     });
-    await invoke("cache_mark_read", {
+    await invoke('cache_mark_read', {
       account_id: accountId,
       folder,
       uid,
-      read: action === "read",
+      read: action === 'read',
     }).catch(() => {});
     return;
   }
-  if (action === "junk" || action === "notJunk") {
-    await enqueueOp("icloud:junk", {
+  if (action === 'junk' || action === 'notJunk') {
+    await enqueueOp('icloud:junk', {
       accountId,
       folder,
       uid,
-      junk: action === "junk",
+      junk: action === 'junk',
     });
-    await invoke("cache_remove_message", {
+    await invoke('cache_remove_message', {
       account_id: accountId,
       folder,
       uid,
@@ -161,11 +160,9 @@ export async function queueIcloudAction(
     return;
   }
   const targetFolder =
-    action === "archive"
-      ? ICLOUD_FOLDER_NAMES.archive
-      : ICLOUD_FOLDER_NAMES.trash;
-  await enqueueOp("icloud:move", { accountId, folder, uid, targetFolder });
-  await invoke("cache_remove_message", {
+    action === 'archive' ? ICLOUD_FOLDER_NAMES.archive : ICLOUD_FOLDER_NAMES.trash;
+  await enqueueOp('icloud:move', { accountId, folder, uid, targetFolder });
+  await invoke('cache_remove_message', {
     account_id: accountId,
     folder,
     uid,
@@ -175,27 +172,27 @@ export async function queueIcloudAction(
 function runOp(op: PendingOp): Promise<unknown> {
   const p = JSON.parse(op.payload);
   switch (op.kind) {
-    case "gmail:read":
-      return markRead(p.id, p.accountId ?? "legacy");
-    case "gmail:unread":
-      return markUnread(p.id, p.accountId ?? "legacy");
-    case "gmail:archive":
-      return archiveMessage(p.id, p.accountId ?? "legacy");
-    case "gmail:trash":
-      return trashMessage(p.id, p.accountId ?? "legacy");
-    case "gmail:junk":
-      return junkMessage(p.id, p.accountId ?? "legacy");
-    case "gmail:notJunk":
-      return notJunkMessage(p.id, p.accountId ?? "legacy");
-    case "gmail:send":
-      return sendMessage(p as OutgoingMail, p.accountId ?? "legacy");
-    case "icloud:read":
+    case 'gmail:read':
+      return markRead(p.id, p.accountId ?? 'legacy');
+    case 'gmail:unread':
+      return markUnread(p.id, p.accountId ?? 'legacy');
+    case 'gmail:archive':
+      return archiveMessage(p.id, p.accountId ?? 'legacy');
+    case 'gmail:trash':
+      return trashMessage(p.id, p.accountId ?? 'legacy');
+    case 'gmail:junk':
+      return junkMessage(p.id, p.accountId ?? 'legacy');
+    case 'gmail:notJunk':
+      return notJunkMessage(p.id, p.accountId ?? 'legacy');
+    case 'gmail:send':
+      return sendMessage(p as OutgoingMail, p.accountId ?? 'legacy');
+    case 'icloud:read':
       return icloudMarkRead(p.accountId, p.folder, p.uid, p.read);
-    case "icloud:move":
+    case 'icloud:move':
       return icloudMoveMessage(p.accountId, p.folder, p.uid, p.targetFolder);
-    case "icloud:junk":
+    case 'icloud:junk':
       return icloudMarkJunk(p.accountId, p.folder, p.uid, p.junk);
-    case "icloud:send":
+    case 'icloud:send':
       return icloudSendMessage(p as IcloudSendPayload);
     default:
       throw new Error(`unknown pending op kind: ${op.kind}`);
@@ -208,23 +205,29 @@ let flushing = false;
 // network failure (still offline); non-network failures are retried up to
 // MAX_ATTEMPTS, then dropped.
 export async function flushPendingOps(): Promise<number> {
-  if (flushing) return 0;
-  if (typeof navigator !== "undefined" && !navigator.onLine) return 0;
+  if (flushing) {
+    return 0;
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return 0;
+  }
   flushing = true;
   try {
-    const ops = await invoke<PendingOp[]>("ops_list");
+    const ops = await invoke<PendingOp[]>('ops_list');
     let done = 0;
     for (const op of ops) {
       try {
         await runOp(op);
-        await invoke("ops_delete", { id: op.id });
+        await invoke('ops_delete', { id: op.id });
         done++;
       } catch (err) {
-        if (isNetworkError(err)) break;
+        if (isNetworkError(err)) {
+          break;
+        }
         if (op.attempts + 1 >= MAX_ATTEMPTS) {
-          await invoke("ops_delete", { id: op.id });
+          await invoke('ops_delete', { id: op.id });
         } else {
-          await invoke("ops_bump", { id: op.id });
+          await invoke('ops_bump', { id: op.id });
         }
       }
     }
@@ -242,21 +245,21 @@ export function useOfflineQueue(intervalMs = 60_000) {
 
   useEffect(() => {
     let cancelled = false;
-    const flush = async () => {
+    async function flush() {
       const done = await flushPendingOps().catch(() => 0);
       if (!cancelled && done > 0) {
-        queryClient.invalidateQueries({ queryKey: ["gmail"] });
-        queryClient.invalidateQueries({ queryKey: ["icloud"] });
-        queryClient.invalidateQueries({ queryKey: ["ops"] });
+        queryClient.invalidateQueries({ queryKey: ['gmail'] });
+        queryClient.invalidateQueries({ queryKey: ['icloud'] });
+        queryClient.invalidateQueries({ queryKey: ['ops'] });
       }
-    };
+    }
     void flush();
     const timer = setInterval(flush, intervalMs);
-    window.addEventListener("online", flush);
+    window.addEventListener('online', flush);
     return () => {
       cancelled = true;
       clearInterval(timer);
-      window.removeEventListener("online", flush);
+      window.removeEventListener('online', flush);
     };
   }, [queryClient, intervalMs]);
 }

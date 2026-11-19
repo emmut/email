@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState } from 'react';
 import {
   Archive,
   Folder as FolderIcon,
@@ -8,8 +8,8 @@ import {
   ShieldCheck,
   Tag as TagIcon,
   Trash2,
-} from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+} from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 
 import {
   AlertDialog,
@@ -20,8 +20,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -32,39 +32,39 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import { Checkbox } from "@/components/ui/checkbox";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { useSettings } from "@/lib/settings";
-import { cn, errMessage } from "@/lib/utils";
-import type { Mail } from "@/components/mail/data";
-import { tagsQuery } from "@/lib/gmail";
-import {
-  ICLOUD_FOLDER_NAMES,
-  icloudFoldersQuery,
-  parseIcloudMailId,
-} from "@/lib/icloud";
+} from '@/components/ui/context-menu';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { useSettings } from '@/lib/settings';
+import { cn, errMessage } from '@/lib/utils';
+import type { Mail } from '@/components/mail/data';
+import { tagsQuery } from '@/lib/gmail';
+import { ICLOUD_FOLDER_NAMES, icloudFoldersQuery, parseIcloudMailId } from '@/lib/icloud';
 import {
   useMailActions,
   useMoveToFolder,
   useTagActions,
   type JunkAction,
-} from "@/hooks/use-mail-actions";
-import { useAccount } from "@/context/AccountContext";
+} from '@/hooks/use-mail-actions';
+import { useAccount } from '@/context/account-context';
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
   });
 }
 
-function labelVariant(label: string): "default" | "outline" | "secondary" {
-  if (["work", "important"].includes(label)) return "default";
-  if (["personal", "budget"].includes(label)) return "outline";
-  return "secondary";
+function labelVariant(label: string): 'default' | 'outline' | 'secondary' {
+  if (['work', 'important'].includes(label)) {
+    return 'default';
+  }
+  if (['personal', 'budget'].includes(label)) {
+    return 'outline';
+  }
+  return 'secondary';
 }
 
 // Base UI's Checkbox re-dispatches clicks on a hidden <input> that is a
@@ -105,7 +105,7 @@ export function MailList({
   const { toggle: toggleTag } = useTagActions();
   const { moveTo, error: moveError } = useMoveToFolder();
   const { activeAccount } = useAccount();
-  const isIcloud = activeAccount?.kind === "icloud";
+  const isIcloud = activeAccount?.kind === 'icloud';
   // Tags are a Gmail feature.
   const { data: tags } = useQuery({
     ...tagsQuery(activeAccount?.id),
@@ -113,12 +113,10 @@ export function MailList({
   });
   // "Move to folder" targets: Inbox plus the user's custom mailboxes.
   const { data: customFolders } = useQuery({
-    ...icloudFoldersQuery(activeAccount?.id ?? ""),
+    ...icloudFoldersQuery(activeAccount?.id ?? ''),
     enabled: isIcloud,
   });
-  const moveTargets = isIcloud
-    ? [ICLOUD_FOLDER_NAMES.inbox, ...(customFolders ?? [])]
-    : [];
+  const moveTargets = isIcloud ? [ICLOUD_FOLDER_NAMES.inbox, ...(customFolders ?? [])] : [];
 
   return (
     <ScrollArea className="h-full">
@@ -136,16 +134,21 @@ export function MailList({
                 <div
                   role="button"
                   onClick={(e) => {
-                    if (isCheckboxClick(e.target)) return;
-                    if (e.metaKey || e.ctrlKey) onToggleCheck(mail.id, false);
-                    else if (e.shiftKey && anyChecked)
+                    if (isCheckboxClick(e.target)) {
+                      return;
+                    }
+                    if (e.metaKey || e.ctrlKey) {
+                      onToggleCheck(mail.id, false);
+                    } else if (e.shiftKey && anyChecked) {
                       onToggleCheck(mail.id, true);
-                    else onSelect(mail.id);
+                    } else {
+                      onSelect(mail.id);
+                    }
                   }}
                   className={cn(
-                    "group flex cursor-pointer flex-col items-start gap-2 rounded-lg border p-3 text-left text-sm transition-all hover:bg-accent select-none",
-                    selectedId === mail.id && "bg-muted",
-                    checkedIds.has(mail.id) && "border-primary/50 bg-accent/50",
+                    'group flex cursor-pointer flex-col items-start gap-2 rounded-lg border p-3 text-left text-sm transition-all hover:bg-accent select-none',
+                    selectedId === mail.id && 'bg-muted',
+                    checkedIds.has(mail.id) && 'border-primary/50 bg-accent/50',
                   )}
                 >
                   <div className="flex w-full flex-col gap-1">
@@ -160,21 +163,17 @@ export function MailList({
                             onToggleCheck(mail.id, e.shiftKey);
                           }}
                           className={cn(
-                            "opacity-0 transition-opacity group-hover:opacity-100",
-                            anyChecked && "opacity-100",
+                            'opacity-0 transition-opacity group-hover:opacity-100',
+                            anyChecked && 'opacity-100',
                           )}
                         />
                         <span className="font-semibold">{mail.name}</span>
-                        {!mail.read && (
-                          <span className="flex size-2 rounded-full bg-blue-600" />
-                        )}
+                        {!mail.read && <span className="flex size-2 rounded-full bg-blue-600" />}
                       </div>
                       <span
                         className={cn(
-                          "ml-auto text-xs",
-                          selectedId === mail.id
-                            ? "text-foreground"
-                            : "text-muted-foreground",
+                          'ml-auto text-xs',
+                          selectedId === mail.id ? 'text-foreground' : 'text-muted-foreground',
                         )}
                       >
                         {formatDate(mail.date)}
@@ -200,28 +199,29 @@ export function MailList({
               }
             />
             <ContextMenuContent>
-              <ContextMenuItem onClick={() => act("archive", mail.id)}>
+              <ContextMenuItem onClick={() => act('archive', mail.id)}>
                 <Archive />
                 Archive
               </ContextMenuItem>
               <ContextMenuItem
                 variant="destructive"
                 onClick={() => {
-                  if (!inTrash) act("trash", mail.id);
-                  else if (settings.confirmPermanentDelete)
+                  if (!inTrash) {
+                    act('trash', mail.id);
+                  } else if (settings.confirmPermanentDelete) {
                     setDeleteTarget(mail);
-                  else act("delete", mail.id);
+                  } else {
+                    act('delete', mail.id);
+                  }
                 }}
               >
                 <Trash2 />
-                {inTrash ? "Delete permanently" : "Move to trash"}
+                {inTrash ? 'Delete permanently' : 'Move to trash'}
               </ContextMenuItem>
               {junkAction && (
                 <ContextMenuItem onClick={() => act(junkAction, mail.id)}>
-                  {junkAction === "notJunk" ? <ShieldCheck /> : <ShieldAlert />}
-                  {junkAction === "notJunk"
-                    ? "Mark as not junk"
-                    : "Mark as junk"}
+                  {junkAction === 'notJunk' ? <ShieldCheck /> : <ShieldAlert />}
+                  {junkAction === 'notJunk' ? 'Mark as not junk' : 'Mark as junk'}
                 </ContextMenuItem>
               )}
               {moveTargets.length ? (
@@ -236,14 +236,10 @@ export function MailList({
                       {moveTargets.map((target) => (
                         <ContextMenuItem
                           key={target}
-                          disabled={
-                            parseIcloudMailId(mail.id)?.folder === target
-                          }
+                          disabled={parseIcloudMailId(mail.id)?.folder === target}
                           onClick={() => moveTo(mail.id, target)}
                         >
-                          {target === ICLOUD_FOLDER_NAMES.inbox
-                            ? "Inbox"
-                            : target}
+                          {target === ICLOUD_FOLDER_NAMES.inbox ? 'Inbox' : target}
                         </ContextMenuItem>
                       ))}
                     </ContextMenuSubContent>
@@ -265,9 +261,7 @@ export function MailList({
                         <ContextMenuCheckboxItem
                           key={tag.id}
                           checked={mail.labelIds.includes(tag.id)}
-                          onCheckedChange={(on) =>
-                            toggleTag(mail.id, tag, on === true)
-                          }
+                          onCheckedChange={(on) => toggleTag(mail.id, tag, on === true)}
                         >
                           {tag.name}
                         </ContextMenuCheckboxItem>
@@ -278,12 +272,12 @@ export function MailList({
               ) : null}
               <ContextMenuSeparator />
               {mail.read ? (
-                <ContextMenuItem onClick={() => act("unread", mail.id)}>
+                <ContextMenuItem onClick={() => act('unread', mail.id)}>
                   <MailX />
                   Mark as unread
                 </ContextMenuItem>
               ) : (
-                <ContextMenuItem onClick={() => act("read", mail.id)}>
+                <ContextMenuItem onClick={() => act('read', mail.id)}>
                   <MailOpen />
                   Mark as read
                 </ContextMenuItem>
@@ -300,15 +294,12 @@ export function MailList({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete permanently?</AlertDialogTitle>
             <AlertDialogDescription>
-              “{deleteTarget?.subject}” is deleted forever. This cannot be
-              undone.
+              “{deleteTarget?.subject}” is deleted forever. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => deleteTarget && act("delete", deleteTarget.id)}
-            >
+            <AlertDialogAction onClick={() => deleteTarget && act('delete', deleteTarget.id)}>
               Delete permanently
             </AlertDialogAction>
           </AlertDialogFooter>

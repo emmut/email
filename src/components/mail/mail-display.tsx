@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from 'react';
 import {
   Archive,
   Forward,
@@ -9,10 +9,10 @@ import {
   ShieldAlert,
   ShieldCheck,
   Trash2,
-} from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { isTauri } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
+} from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { isTauri } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 import {
   AlertDialog,
@@ -23,118 +23,48 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import type { Mail } from "@/components/mail/data";
-import { Kbd } from "@/components/ui/kbd";
-import { ComposeDialog, type ComposeDraft } from "@/components/mail/compose";
-import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
-import { useKeys, useSettings } from "@/lib/settings";
-import { noDialogOpen, useMenuEvents } from "@/hooks/use-menu";
-import { useMailActions, type JunkAction } from "@/hooks/use-mail-actions";
-import { mailBodyQuery, profileQuery, type MailBody } from "@/lib/gmail";
-import { icloudMessageBodyQuery, parseIcloudMailId } from "@/lib/icloud";
-import { useAccount } from "@/context/AccountContext";
-import { errMessage } from "@/lib/utils";
-import { recipientEmail, splitAddressList } from "@/lib/recipients";
+} from '@/components/ui/alert-dialog';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import type { Mail } from '@/components/mail/data';
+import { Kbd } from '@/components/ui/kbd';
+import { ComposeDialog, type ComposeDraft } from '@/components/mail/compose';
+import { useKeyboardShortcuts } from '@/hooks/use-shortcuts';
+import { useKeys, useSettings } from '@/lib/settings';
+import { noDialogOpen, useMenuEvents } from '@/hooks/use-menu';
+import { useMailActions, type JunkAction } from '@/hooks/use-mail-actions';
+import { mailBodyQuery, profileQuery } from '@/lib/gmail';
+import { icloudMessageBodyQuery, parseIcloudMailId } from '@/lib/icloud';
+import { useAccount } from '@/context/account-context';
+import { forwardDraft, replyDraft } from '@/lib/mail-drafts';
+import { errMessage } from '@/lib/utils';
 import {
   emailBridgeMessage,
   emailIframeSandbox,
   emailSrcDoc,
-} from "@/components/mail/email-link-bridge";
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function quoteOriginal(body: MailBody): string {
-  const source = body.text.trim();
-  if (!source) return "";
-  const quoted = source.split("\n").map(escapeHtml).join("<br>");
-  return (
-    `<p></p><p>On ${escapeHtml(body.date)}, ${escapeHtml(body.from)} wrote:</p>` +
-    `<blockquote><p>${quoted}</p></blockquote>`
-  );
-}
-
-export function replyDraft(
-  body: MailBody,
-  all: boolean,
-  self: string,
-): ComposeDraft {
-  const notSelf = (addr: string) =>
-    recipientEmail(addr) !== recipientEmail(self) &&
-    recipientEmail(addr) !== recipientEmail(body.replyTo);
-  const to = all
-    ? [body.replyTo, ...splitAddressList(body.to).filter(Boolean).filter(notSelf)]
-    : [body.replyTo];
-  const cc = all ? splitAddressList(body.cc).filter(Boolean).filter(notSelf) : [];
-  return {
-    to: to.join(", "),
-    cc: cc.join(", ") || undefined,
-    subject: /^re:/i.test(body.subject) ? body.subject : `Re: ${body.subject}`,
-    bodyHtml: quoteOriginal(body),
-    threadId: body.threadId,
-    inReplyTo: body.messageId,
-    references: `${body.references} ${body.messageId}`.trim(),
-  };
-}
-
-export function forwardDraft(body: MailBody): ComposeDraft {
-  const headers = [
-    `From: ${body.from}`,
-    `Date: ${body.date}`,
-    `Subject: ${body.subject}`,
-    `To: ${body.to}`,
-    ...(body.cc ? [`Cc: ${body.cc}`] : []),
-  ]
-    .map(escapeHtml)
-    .join("<br>");
-  const quoted = body.text.trim().split("\n").map(escapeHtml).join("<br>");
-  return {
-    forward: true,
-    subject: /^fwd:/i.test(body.subject)
-      ? body.subject
-      : `Fwd: ${body.subject}`,
-    bodyHtml:
-      `<p></p><p>---------- Forwarded message ----------<br>${headers}</p>` +
-      (quoted ? `<blockquote><p>${quoted}</p></blockquote>` : ""),
-    threadId: body.threadId,
-    references: `${body.references} ${body.messageId}`.trim(),
-  };
-}
+} from '@/components/mail/email-link-bridge';
 
 type LinkDiagnostic =
-  | { status: "waiting" }
-  | { status: "blocked" }
-  | { status: "ready" }
-  | { status: "opened"; href: string; error?: string };
+  | { status: 'waiting' }
+  | { status: 'blocked' }
+  | { status: 'ready' }
+  | { status: 'opened'; href: string; error?: string };
 
-function LinkDiagnosticStatus({
-  diagnostic,
-}: {
-  diagnostic: LinkDiagnostic;
-}) {
-  if (diagnostic.status === "waiting") {
+function LinkDiagnosticStatus({ diagnostic }: { diagnostic: LinkDiagnostic }) {
+  if (diagnostic.status === 'waiting') {
     return <>Link bridge: starting…</>;
   }
-  if (diagnostic.status === "blocked") {
+  if (diagnostic.status === 'blocked') {
     return (
       <span className="text-destructive">
-        Link bridge not running — inline script blocked. Report this issue to
-        the developer.
+        Link bridge not running — inline script blocked. Report this issue to the developer.
       </span>
     );
   }
-  if (diagnostic.status === "ready") {
+  if (diagnostic.status === 'ready') {
     return <>Link bridge ready</>;
   }
   if (diagnostic.error) {
@@ -152,7 +82,7 @@ function initials(name: string) {
     .split(/[\s.@]+/)
     .filter(Boolean)
     .map((part) => part[0])
-    .join("")
+    .join('')
     .slice(0, 2)
     .toUpperCase();
 }
@@ -173,67 +103,58 @@ export function MailDisplay({
   const [draft, setDraft] = useState<ComposeDraft | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const emailFrame = useRef<HTMLIFrameElement>(null);
+  const [bridgeToken] = useState(() => crypto.randomUUID());
   const [linkDiagnostic, setLinkDiagnostic] = useState<LinkDiagnostic>({
-    status: "waiting",
+    status: 'waiting',
   });
 
   useEffect(() => {
-    const onMessage = (event: MessageEvent<unknown>) => {
-      const message = emailBridgeMessage(
-        event,
-        emailFrame.current?.contentWindow,
-      );
-      if (!message) return;
+    function onMessage(event: MessageEvent<unknown>) {
+      const message = emailBridgeMessage(event, emailFrame.current?.contentWindow, bridgeToken);
+      if (!message) {
+        return;
+      }
 
-      if (message.type === "ready") {
+      if (message.type === 'ready') {
         setLinkDiagnostic((diagnostic) => {
-          if (
-            diagnostic.status === "ready" ||
-            diagnostic.status === "opened"
-          ) {
+          if (diagnostic.status === 'ready' || diagnostic.status === 'opened') {
             return diagnostic;
           }
-          return { status: "ready" };
+          return { status: 'ready' };
         });
         return;
       }
 
       const { href } = message;
 
-      setLinkDiagnostic({ status: "opened", href });
+      setLinkDiagnostic({ status: 'opened', href });
 
       if (isTauri()) {
         void openUrl(href)
           .then(() =>
             setLinkDiagnostic((diagnostic) => {
-              if (
-                diagnostic.status !== "opened" ||
-                diagnostic.href !== href
-              ) {
+              if (diagnostic.status !== 'opened' || diagnostic.href !== href) {
                 return diagnostic;
               }
               return { ...diagnostic, error: undefined };
             }),
           )
           .catch((error: unknown) => {
-            console.error("Could not open email link", error);
+            console.error('Could not open email link', error);
             setLinkDiagnostic((diagnostic) => {
-              if (
-                diagnostic.status !== "opened" ||
-                diagnostic.href !== href
-              ) {
+              if (diagnostic.status !== 'opened' || diagnostic.href !== href) {
                 return diagnostic;
               }
               return { ...diagnostic, error: errMessage(error) };
             });
           });
       } else {
-        window.open(href, "_blank", "noopener,noreferrer");
+        window.open(href, '_blank', 'noopener,noreferrer');
       }
-    };
+    }
 
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
   }, []);
 
   const { activeAccount } = useAccount();
@@ -243,13 +164,13 @@ export function MailDisplay({
   const { data: profile } = useQuery({ ...profileQuery(activeAccount?.id), enabled: !isIcloud });
 
   const gmailBody = useQuery({
-    ...mailBodyQuery(mail?.id ?? "", activeAccount?.id),
+    ...mailBodyQuery(mail?.id ?? '', activeAccount?.id),
     enabled: mail !== null && !isIcloud,
   });
   const icloudBody = useQuery({
     ...icloudMessageBodyQuery(
-      activeAccount?.id ?? "",
-      icloudRef?.folder ?? "",
+      activeAccount?.id ?? '',
+      icloudRef?.folder ?? '',
       icloudRef?.uid ?? 0,
     ),
     enabled: isIcloud && !!activeAccount,
@@ -257,53 +178,61 @@ export function MailDisplay({
   const bodyQuery = isIcloud ? icloudBody : gmailBody;
 
   useEffect(() => {
-    if (!bodyQuery.data?.html) return;
+    if (!bodyQuery.data?.html) {
+      return;
+    }
 
-    setLinkDiagnostic({ status: "waiting" });
+    setLinkDiagnostic({ status: 'waiting' });
     const timeout = window.setTimeout(() => {
       setLinkDiagnostic((diagnostic) => {
-        if (diagnostic.status !== "waiting") {
+        if (diagnostic.status !== 'waiting') {
           return diagnostic;
         }
-        return { status: "blocked" };
+        return { status: 'blocked' };
       });
     }, 4000);
 
     return () => window.clearTimeout(timeout);
   }, [bodyQuery.data?.html, mail?.id]);
 
-  const openReply = (all: boolean) => {
-    if (!bodyQuery.data) return;
-    const self = (
-      activeAccount?.email ??
-      profile?.emailAddress ??
-      ""
-    ).toLowerCase();
+  function openReply(all: boolean) {
+    if (!bodyQuery.data) {
+      return;
+    }
+    const self = (activeAccount?.email ?? profile?.emailAddress ?? '').toLowerCase();
     setDraft(replyDraft(bodyQuery.data, all, self));
-  };
+  }
 
-  const openForward = () => {
-    if (!bodyQuery.data) return;
+  function openForward() {
+    if (!bodyQuery.data) {
+      return;
+    }
     setDraft(forwardDraft(bodyQuery.data));
-  };
+  }
 
   const { act, isPending, error: actError } = useMailActions(onRemoved);
 
   // Trash is instant (recoverable for 30 days); deleting from within Trash
   // is forever, so that one asks first — unless confirmation is turned off
   // in settings.
-  const trashSelected = () => {
-    if (!mail) return;
-    if (!inTrash) act("trash", mail.id);
-    else if (settings.confirmPermanentDelete) setConfirmDelete(true);
-    else act("delete", mail.id);
-  };
+  function trashSelected() {
+    if (!mail) {
+      return;
+    }
+    if (!inTrash) {
+      act('trash', mail.id);
+    } else if (settings.confirmPermanentDelete) {
+      setConfirmDelete(true);
+    } else {
+      act('delete', mail.id);
+    }
+  }
 
   useKeyboardShortcuts({
     [keys.reply]: () => mail && openReply(false),
     [keys.replyAll]: () => mail && openReply(true),
     [keys.forward]: () => mail && openForward(),
-    [keys.archive]: () => mail && act("archive", mail.id),
+    [keys.archive]: () => mail && act('archive', mail.id),
     [keys.trash]: () => trashSelected(),
     [keys.junk]: () => mail && junkAction && act(junkAction, mail.id),
   });
@@ -333,7 +262,7 @@ export function MailDisplay({
                 variant="ghost"
                 size="icon"
                 disabled={isPending}
-                onClick={() => act("archive", mail.id)}
+                onClick={() => act('archive', mail.id)}
               >
                 <Archive className="size-4" />
               </Button>
@@ -346,19 +275,13 @@ export function MailDisplay({
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={isPending}
-                onClick={trashSelected}
-              >
+              <Button variant="ghost" size="icon" disabled={isPending} onClick={trashSelected}>
                 <Trash2 className="size-4" />
               </Button>
             }
           />
           <TooltipContent>
-            {inTrash ? "Delete permanently" : "Move to trash"}{" "}
-            <Kbd>{keys.trash}</Kbd>
+            {inTrash ? 'Delete permanently' : 'Move to trash'} <Kbd>{keys.trash}</Kbd>
           </TooltipContent>
         </Tooltip>
         {junkAction && (
@@ -371,7 +294,7 @@ export function MailDisplay({
                   disabled={isPending}
                   onClick={() => act(junkAction, mail.id)}
                 >
-                  {junkAction === "notJunk" ? (
+                  {junkAction === 'notJunk' ? (
                     <ShieldCheck className="size-4" />
                   ) : (
                     <ShieldAlert className="size-4" />
@@ -380,7 +303,7 @@ export function MailDisplay({
               }
             />
             <TooltipContent>
-              {junkAction === "notJunk" ? "Mark as not junk" : "Mark as junk"}{" "}
+              {junkAction === 'notJunk' ? 'Mark as not junk' : 'Mark as junk'}{' '}
               <Kbd>{keys.junk}</Kbd>
             </TooltipContent>
           </Tooltip>
@@ -392,13 +315,9 @@ export function MailDisplay({
                 variant="ghost"
                 size="icon"
                 disabled={isPending}
-                onClick={() => act(mail.read ? "unread" : "read", mail.id)}
+                onClick={() => act(mail.read ? 'unread' : 'read', mail.id)}
               >
-                {mail.read ? (
-                  <MailX className="size-4" />
-                ) : (
-                  <MailOpen className="size-4" />
-                )}
+                {mail.read ? <MailX className="size-4" /> : <MailOpen className="size-4" />}
               </Button>
             }
           />
@@ -424,7 +343,7 @@ export function MailDisplay({
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => act("delete", mail.id)}>
+              <AlertDialogAction onClick={() => act('delete', mail.id)}>
                 Delete permanently
               </AlertDialogAction>
             </AlertDialogFooter>
@@ -486,9 +405,7 @@ export function MailDisplay({
       </div>
       <ComposeDialog draft={draft} onClose={() => setDraft(null)} />
       {actError && (
-        <p className="text-destructive px-4 pb-2 text-xs">
-          Action failed: {errMessage(actError)}
-        </p>
+        <p className="text-destructive px-4 pb-2 text-xs">Action failed: {errMessage(actError)}</p>
       )}
       <Separator />
       <div className="flex items-start gap-4 p-4">
@@ -526,7 +443,7 @@ export function MailDisplay({
             title="Message body"
             ref={emailFrame}
             sandbox={emailIframeSandbox}
-            srcDoc={emailSrcDoc(bodyQuery.data.html)}
+            srcDoc={emailSrcDoc(bodyQuery.data.html, bridgeToken)}
             className="min-h-0 w-full flex-1 border-0 bg-white"
           />
         ) : (

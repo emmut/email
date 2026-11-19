@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-import { ShortcutsHelp } from "@/components/mail/shortcuts-help";
+import { ShortcutsHelp } from '@/components/mail/shortcuts-help';
 
 // useKeys reads settings through react-query.
 function renderHelp(open: boolean) {
@@ -13,27 +13,27 @@ function renderHelp(open: boolean) {
   );
 }
 
-describe("ShortcutsHelp", () => {
-  it("lists every shortcut when open", () => {
+describe('ShortcutsHelp', () => {
+  it('lists every shortcut when open', () => {
     renderHelp(true);
     for (const label of [
-      "Compose",
-      "Reply",
-      "Reply all",
-      "Forward",
-      "Archive",
-      "Move to trash",
-      "Mark as unread",
-      "Mark as read",
-      "Select multiple",
-      "Select range",
+      'Compose',
+      'Reply',
+      'Reply all',
+      'Forward',
+      'Archive',
+      'Move to trash',
+      'Mark as unread',
+      'Mark as read',
+      'Select multiple',
+      'Select range',
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });
 
-  it("renders nothing while closed", () => {
+  it('renders nothing while closed', () => {
     renderHelp(false);
-    expect(screen.queryByText("Keyboard shortcuts")).not.toBeInTheDocument();
+    expect(screen.queryByText('Keyboard shortcuts')).not.toBeInTheDocument();
   });
 });

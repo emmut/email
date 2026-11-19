@@ -609,7 +609,7 @@ impl CacheDb {
     pub async fn delete_kv_prefix(&self, prefix: &str) -> Result<(), String> {
         let conn = self.conn.lock().await;
         conn.execute(
-            "DELETE FROM cache_kv WHERE key LIKE ?1 || '%'",
+            "DELETE FROM cache_kv WHERE substr(key, 1, length(?1)) = ?1",
             params![prefix],
         )
         .map_err(|e| e.to_string())?;
@@ -696,10 +696,7 @@ impl CacheDb {
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
             })
             .map_err(|e| e.to_string())?;
         for row in rows {
@@ -726,16 +723,52 @@ impl CacheDb {
 
     pub async fn delete_account_cache(&self, account_id: &str) -> Result<(), String> {
         let conn = self.conn.lock().await;
-        conn.execute(
-            "DELETE FROM cached_messages WHERE account_id = ?1",
+        for table in ["cached_messages", "sync_state"] {
+            conn.execute(
+                &format!("DELETE FROM {table} WHERE account_id = ?1"),
+                params![account_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    pub async fn delete_account_data(&self, account_id: &str) -> Result<(), String> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        for table in [
+            "cached_messages",
+            "sync_state",
+            "gmail_messages",
+            "gmail_message_labels",
+        ] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE account_id = ?1"),
+                params![account_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        let gmail_prefix = format!("gmail:{account_id}:");
+        tx.execute(
+            "DELETE FROM cache_kv WHERE substr(key, 1, length(?1)) = ?1
+             OR key IN (?2, ?3, ?4, ?5, ?6)",
+            params![
+                gmail_prefix,
+                format!("icloud:counts:{account_id}"),
+                format!("icloud:folders:{account_id}"),
+                format!("rules:v1:{account_id}"),
+                format!("rules:cursor:v1:{account_id}"),
+                format!("signature:{account_id}")
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM pending_ops WHERE CASE WHEN json_valid(payload)
+             THEN json_extract(payload, '$.accountId') = ?1 ELSE 0 END",
             params![account_id],
         )
         .map_err(|e| e.to_string())?;
-        conn.execute(
-            "DELETE FROM sync_state WHERE account_id = ?1",
-            params![account_id],
-        )
-        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -848,4 +881,75 @@ pub struct PendingOp {
     pub payload: String,
     pub attempts: i64,
     pub created_at: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cache() -> CacheDb {
+        let conn = Connection::open_in_memory().unwrap();
+        CacheDb::init_tables(&conn).unwrap();
+        CacheDb {
+            conn: Arc::new(tokio::sync::Mutex::new(conn)),
+        }
+    }
+
+    #[tokio::test]
+    async fn prefix_deletion_treats_sql_wildcards_literally() {
+        let cache = cache();
+        cache.put_kv("account_a:key", "{}").await.unwrap();
+        cache.put_kv("accountXa:key", "{}").await.unwrap();
+        cache.delete_kv_prefix("account_a:").await.unwrap();
+        assert!(cache.get_kv("account_a:key").await.unwrap().is_none());
+        assert!(cache.get_kv("accountXa:key").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn account_removal_clears_private_cache_and_queue_only_for_that_account() {
+        let cache = cache();
+        for id in ["a", "ab"] {
+            cache
+                .put_kv(&format!("gmail:{id}:body:message"), "{}")
+                .await
+                .unwrap();
+            cache
+                .put_kv(&format!("icloud:folders:{id}"), "[]")
+                .await
+                .unwrap();
+            let conn = cache.conn.lock().await;
+            conn.execute(
+                "INSERT INTO pending_ops (kind, payload, created_at) VALUES ('gmail:send', ?1, '')",
+                params![format!(r#"{{"accountId":"{id}"}}"#)],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO gmail_messages (account_id, id, name, email, subject, date, fetched_at) VALUES (?1, 'message', '', '', '', '', '')", params![id]).unwrap();
+            conn.execute(
+                "INSERT INTO gmail_message_labels VALUES (?1, 'message', 'INBOX')",
+                params![id],
+            )
+            .unwrap();
+        }
+        cache.delete_account_data("a").await.unwrap();
+        assert!(cache
+            .get_kv("gmail:a:body:message")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(cache.get_kv("icloud:folders:a").await.unwrap().is_none());
+        assert!(cache
+            .get_kv("gmail:ab:body:message")
+            .await
+            .unwrap()
+            .is_some());
+        let conn = cache.conn.lock().await;
+        for table in ["gmail_messages", "gmail_message_labels", "pending_ops"] {
+            let count: i64 = conn
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 1);
+        }
+    }
 }

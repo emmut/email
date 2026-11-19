@@ -1,12 +1,12 @@
-import { useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
-import Mention from "@tiptap/extension-mention";
-import type { Editor, Range } from "@tiptap/react";
-import type { SuggestionProps } from "@tiptap/suggestion";
+import { useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import Mention from '@tiptap/extension-mention';
+import type { Editor, Range } from '@tiptap/react';
+import type { SuggestionProps } from '@tiptap/suggestion';
 
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
-import type { Contact } from "@/lib/gmail";
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
+import type { Contact } from '@/lib/gmail';
 
 export interface MentionConfig {
   contacts: Contact[];
@@ -20,16 +20,10 @@ type ContactSuggestion = SuggestionProps<Contact, Contact>;
 
 // Contacts matching the text typed after "@"; an empty query (bare "@")
 // suggests from the top of the list, like Gmail does.
-export function filterMentionContacts(
-  contacts: Contact[],
-  query: string,
-): Contact[] {
+export function filterMentionContacts(contacts: Contact[], query: string): Contact[] {
   const q = query.trim().toLowerCase();
   const matches = q
-    ? contacts.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q),
-      )
+    ? contacts.filter((c) => c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q))
     : contacts;
   return matches.slice(0, 8);
 }
@@ -38,16 +32,18 @@ export function filterMentionContacts(
 // Mirrors the default mention command's overwrite of a following space.
 function insertMention(editor: Editor, range: Range, contact: Contact) {
   const nodeAfter = editor.view.state.selection.$to.nodeAfter;
-  if (nodeAfter?.text?.startsWith(" ")) range.to += 1;
+  if (nodeAfter?.text?.startsWith(' ')) {
+    range.to += 1;
+  }
   editor
     .chain()
     .focus()
     .insertContentAt(range, [
       {
-        type: "mention",
+        type: 'mention',
         attrs: { id: contact.email, label: contact.name || contact.email },
       },
-      { type: "text", text: " " },
+      { type: 'text', text: ' ' },
     ])
     .run();
 }
@@ -62,9 +58,7 @@ export function useMention(config: MentionConfig | undefined): {
 } {
   const contactsRef = useRef<Contact[]>([]);
   contactsRef.current = config?.contacts ?? [];
-  const onMentionRef = useRef<MentionConfig["onMention"] | undefined>(
-    undefined,
-  );
+  const onMentionRef = useRef<MentionConfig['onMention'] | undefined>(undefined);
   onMentionRef.current = config?.onMention;
 
   const [suggestion, setSuggestion] = useState<ContactSuggestion | null>(null);
@@ -73,48 +67,52 @@ export function useMention(config: MentionConfig | undefined): {
   stateRef.current = { suggestion, highlighted };
 
   const [extension] = useState(() => {
-    if (!config) return null;
+    if (!config) {
+      return null;
+    }
 
-    const handleKey = (event: KeyboardEvent): boolean => {
+    function handleKey(event: KeyboardEvent): boolean {
       const { suggestion, highlighted } = stateRef.current;
-      if (!suggestion || suggestion.items.length === 0) return false;
+      if (!suggestion || suggestion.items.length === 0) {
+        return false;
+      }
       const count = suggestion.items.length;
-      if (event.key === "ArrowDown") {
+      if (event.key === 'ArrowDown') {
         setHighlighted((highlighted + 1) % count);
         return true;
       }
-      if (event.key === "ArrowUp") {
+      if (event.key === 'ArrowUp') {
         setHighlighted((highlighted - 1 + count) % count);
         return true;
       }
-      if (event.key === "Enter" || event.key === "Tab") {
+      if (event.key === 'Enter' || event.key === 'Tab') {
         suggestion.command(suggestion.items[highlighted]);
         return true;
       }
       return false;
-    };
+    }
 
     return Mention.extend({
       // Round-trip our mailto-link output (the stock extension only parses
       // its own span markup). Outranks the link mark's a[href] rule.
       parseHTML() {
-        return [{ tag: "a[data-mention]", priority: 100 }];
+        return [{ tag: 'a[data-mention]', priority: 100 }];
       },
     }).configure({
       deleteTriggerWithBackspace: true,
-      renderText: ({ node }) => node.attrs.label ?? node.attrs.id ?? "",
+      renderText: ({ node }) => node.attrs.label ?? node.attrs.id ?? '',
       renderHTML: ({ node }) => [
-        "a",
+        'a',
         {
           href: `mailto:${node.attrs.id}`,
-          "data-mention": "",
-          "data-id": node.attrs.id,
-          "data-label": node.attrs.label,
+          'data-mention': '',
+          'data-id': node.attrs.id,
+          'data-label': node.attrs.label,
         },
-        node.attrs.label ?? node.attrs.id ?? "",
+        node.attrs.label ?? node.attrs.id ?? '',
       ],
       suggestion: {
-        char: "@",
+        char: '@',
         items: ({ query }) => filterMentionContacts(contactsRef.current, query),
         command: ({ editor, range, props }) => {
           const contact = props as unknown as Contact;
@@ -132,17 +130,21 @@ export function useMention(config: MentionConfig | undefined): {
               setSuggestion(props as unknown as ContactSuggestion);
             },
             onUpdate: (props) => {
-              if (dismissed) return;
+              if (dismissed) {
+                return;
+              }
               setHighlighted(0);
               setSuggestion(props as unknown as ContactSuggestion);
             },
             onKeyDown: ({ event }) => {
-              if (event.key === "Escape") {
+              if (event.key === 'Escape') {
                 dismissed = true;
                 setSuggestion(null);
                 return true;
               }
-              if (dismissed) return false;
+              if (dismissed) {
+                return false;
+              }
               return handleKey(event);
             },
             onExit: () => setSuggestion(null),
@@ -186,10 +188,7 @@ function MentionList({
   onPick: (contact: Contact) => void;
 }) {
   // Anchored under the caret; flips above when the space below is tight.
-  const left = Math.max(
-    8,
-    Math.min(rect.left, window.innerWidth - LIST_WIDTH - 8),
-  );
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - LIST_WIDTH - 8));
   const openUp = rect.bottom + 300 > window.innerHeight && rect.top > 300;
   const position = openUp
     ? { left, bottom: window.innerHeight - rect.top + 4 }
@@ -205,8 +204,8 @@ function MentionList({
           key={c.email}
           type="button"
           className={cn(
-            "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm",
-            i === highlighted && "bg-accent text-accent-foreground",
+            'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm',
+            i === highlighted && 'bg-accent text-accent-foreground',
           )}
           onMouseDown={(e) => {
             e.preventDefault(); // keep editor focus and selection
@@ -218,9 +217,7 @@ function MentionList({
             {c.name ? (
               <>
                 <span className="truncate">{c.name}</span>
-                <span className="text-muted-foreground truncate text-xs">
-                  {c.email}
-                </span>
+                <span className="text-muted-foreground truncate text-xs">{c.email}</span>
               </>
             ) : (
               <span className="truncate">{c.email}</span>
@@ -232,11 +229,11 @@ function MentionList({
           >
             <span
               className={cn(
-                "size-1.5 rounded-full",
-                c.source === "google" ? "bg-red-500" : "bg-sky-500",
+                'size-1.5 rounded-full',
+                c.source === 'google' ? 'bg-red-500' : 'bg-sky-500',
               )}
             />
-            {c.source === "google" ? "Gmail" : "iCloud"}
+            {c.source === 'google' ? 'Gmail' : 'iCloud'}
           </Badge>
         </button>
       ))}

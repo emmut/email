@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
-import { RotateCcw } from "lucide-react";
+import { useEffect, useState } from 'react';
+import { RotateCcw } from 'lucide-react';
 
-import { Button } from "@/components/ui/button";
-import { Kbd } from "@/components/ui/kbd";
-import { useSettings } from "@/lib/settings";
+import { Button } from '@/components/ui/button';
+import { Kbd } from '@/components/ui/kbd';
+import { useSettings } from '@/lib/settings';
 import {
   conflictingActions,
   DEFAULT_KEYS,
@@ -11,8 +11,8 @@ import {
   SHORTCUT_ACTIONS,
   SHORTCUT_LABELS,
   type ShortcutAction,
-} from "@/lib/shortcuts";
-import { cn } from "@/lib/utils";
+} from '@/lib/shortcuts';
+import { cn } from '@/lib/utils';
 
 export function ShortcutsSection() {
   const { settings, update, saveError } = useSettings();
@@ -24,25 +24,34 @@ export function ShortcutsSection() {
 
   // While recording, the next valid keypress becomes the binding; Esc cancels.
   useEffect(() => {
-    if (!recording) return;
-    const onKeyDown = (e: KeyboardEvent) => {
+    if (!recording) {
+      return;
+    }
+    const action = recording;
+    function onKeyDown(e: KeyboardEvent) {
       e.preventDefault();
       e.stopPropagation();
-      if (e.key === "Escape") {
+      if (e.key === 'Escape') {
         setRecording(null);
         return;
       }
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (!isValidShortcutKey(e.key)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) {
+        return;
+      }
+      if (!isValidShortcutKey(e.key)) {
+        return;
+      }
       const next = { ...settings.shortcuts };
-      if (e.key === DEFAULT_KEYS[recording]) delete next[recording];
-      else next[recording] = e.key;
+      if (e.key === DEFAULT_KEYS[action]) {
+        delete next[action];
+      } else {
+        next[action] = e.key;
+      }
       void update({ shortcuts: next });
       setRecording(null);
-    };
-    window.addEventListener("keydown", onKeyDown, { capture: true });
-    return () =>
-      window.removeEventListener("keydown", onKeyDown, { capture: true });
+    }
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [recording, settings.shortcuts, update]);
 
   return (
@@ -51,10 +60,7 @@ export function ShortcutsSection() {
         {SHORTCUT_ACTIONS.map((action) => {
           const isOverridden = action in settings.shortcuts;
           return (
-            <div
-              key={action}
-              className="flex items-center justify-between gap-3 px-3 py-2"
-            >
+            <div key={action} className="flex items-center justify-between gap-3 px-3 py-2">
               <span className="text-sm">{SHORTCUT_LABELS[action]}</span>
               <span className="flex items-center gap-1">
                 {isOverridden && (
@@ -74,23 +80,17 @@ export function ShortcutsSection() {
                   </Button>
                 )}
                 <Button
-                  variant={recording === action ? "default" : "outline"}
+                  variant={recording === action ? 'default' : 'outline'}
                   size="sm"
                   className={cn(
-                    "min-w-24",
+                    'min-w-24',
                     conflicts.has(action) &&
                       recording !== action &&
-                      "border-destructive text-destructive",
+                      'border-destructive text-destructive',
                   )}
-                  onClick={() =>
-                    setRecording(recording === action ? null : action)
-                  }
+                  onClick={() => setRecording(recording === action ? null : action)}
                 >
-                  {recording === action ? (
-                    "Press a key…"
-                  ) : (
-                    <Kbd>{keys[action]}</Kbd>
-                  )}
+                  {recording === action ? 'Press a key…' : <Kbd>{keys[action]}</Kbd>}
                 </Button>
               </span>
             </div>
@@ -104,23 +104,16 @@ export function ShortcutsSection() {
       )}
       <div className="flex items-center justify-between">
         <p className="text-muted-foreground text-xs">
-          Click a key to change it. Shortcuts are single keys, pressed outside
-          of text fields.
+          Click a key to change it. Shortcuts are single keys, pressed outside of text fields.
         </p>
         {anyOverride && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void update({ shortcuts: {} })}
-          >
+          <Button variant="outline" size="sm" onClick={() => void update({ shortcuts: {} })}>
             Reset all
           </Button>
         )}
       </div>
       {saveError != null && (
-        <p className="text-destructive text-xs">
-          Could not save: {String(saveError)}
-        </p>
+        <p className="text-destructive text-xs">Could not save: {String(saveError)}</p>
       )}
     </div>
   );

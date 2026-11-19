@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef } from 'react';
 
-import type { Mail } from "@/components/mail/data";
-import { loadSettings } from "@/lib/settings";
+import type { Mail } from '@/components/mail/data';
+import { loadSettings } from '@/lib/settings';
 
 // Desktop "new mail" notifications. The pure selection/formatting helpers are
 // exported for unit testing; notifyNewMail is the side-effecting shell that
@@ -11,16 +11,13 @@ import { loadSettings } from "@/lib/settings";
 // A Gmail history delta reports every added message regardless of folder; only
 // unread arrivals still sitting in the inbox are worth announcing.
 export function isUnreadInboxArrival(m: Mail): boolean {
-  return !m.read && m.labelIds.includes("INBOX");
+  return !m.read && m.labelIds.includes('INBOX');
 }
 
 // The unread inbox mails that weren't in the previous snapshot — used to turn a
 // polled iCloud inbox listing into "what just arrived". labelIds is empty for
 // iCloud, so membership is the caller's responsibility (it passes the inbox).
-export function selectNewInboxMail(
-  mails: Mail[],
-  seen: ReadonlySet<string>,
-): Mail[] {
+export function selectNewInboxMail(mails: Mail[], seen: ReadonlySet<string>): Mail[] {
   return mails.filter((m) => !m.read && !seen.has(m.id));
 }
 
@@ -30,7 +27,9 @@ export function formatMailNotification(mails: Mail[]): {
   title: string;
   body: string;
 } | null {
-  if (mails.length === 0) return null;
+  if (mails.length === 0) {
+    return null;
+  }
   if (mails.length === 1) {
     const [m] = mails;
     return { title: m.name || m.email, body: m.subject };
@@ -40,7 +39,7 @@ export function formatMailNotification(mails: Mail[]): {
     body: mails
       .slice(0, 3)
       .map((m) => m.name || m.email)
-      .join(", "),
+      .join(', '),
   };
 }
 
@@ -48,13 +47,12 @@ export function formatMailNotification(mails: Mail[]): {
 let permissionGranted: boolean | null = null;
 
 async function ensurePermission(): Promise<boolean> {
-  const { isPermissionGranted, requestPermission } = await import(
-    "@tauri-apps/plugin-notification"
-  );
+  const { isPermissionGranted, requestPermission } =
+    await import('@tauri-apps/plugin-notification');
   if (permissionGranted === null) {
     permissionGranted = await isPermissionGranted();
     if (!permissionGranted) {
-      permissionGranted = (await requestPermission()) === "granted";
+      permissionGranted = (await requestPermission()) === 'granted';
     }
   }
   return permissionGranted;
@@ -65,19 +63,25 @@ async function ensurePermission(): Promise<boolean> {
 // no alert. Never throws: a failed notification must not break syncing.
 export async function notifyNewMail(mails: Mail[]): Promise<void> {
   const content = formatMailNotification(mails);
-  if (!content) return;
+  if (!content) {
+    return;
+  }
   try {
     const settings = await loadSettings();
-    if (!settings.notificationsEnabled) return;
+    if (!settings.notificationsEnabled) {
+      return;
+    }
 
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    if (await getCurrentWindow().isFocused()) return;
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    if (await getCurrentWindow().isFocused()) {
+      return;
+    }
 
-    if (!(await ensurePermission())) return;
+    if (!(await ensurePermission())) {
+      return;
+    }
 
-    const { sendNotification } = await import(
-      "@tauri-apps/plugin-notification"
-    );
+    const { sendNotification } = await import('@tauri-apps/plugin-notification');
     sendNotification(content);
   } catch {
     // Notifications are best-effort; ignore plugin/permission failures.
@@ -90,10 +94,7 @@ export async function notifyNewMail(mails: Mail[]): Promise<void> {
 // baseline silently — only mail that appears afterwards is announced. Passing
 // `undefined` (inbox not in view) resets the baseline so returning to it later
 // re-seeds rather than announcing the backlog.
-export function useNewMailNotifications(
-  key: string,
-  mails: Mail[] | undefined,
-) {
+export function useNewMailNotifications(key: string, mails: Mail[] | undefined) {
   const seen = useRef<Set<string> | null>(null);
 
   useEffect(() => {
@@ -111,6 +112,8 @@ export function useNewMailNotifications(
     }
     const fresh = selectNewInboxMail(mails, seen.current);
     for (const m of mails) seen.current.add(m.id);
-    if (fresh.length) void notifyNewMail(fresh);
+    if (fresh.length) {
+      void notifyNewMail(fresh);
+    }
   }, [mails]);
 }
