@@ -44,24 +44,12 @@ import { mailBodyQuery, profileQuery, type MailBody } from "@/lib/gmail";
 import { icloudMessageBodyQuery, parseIcloudMailId } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
 import { errMessage } from "@/lib/utils";
+import { recipientEmail, splitAddressList } from "@/lib/recipients";
 import {
   emailBridgeMessage,
   emailIframeSandbox,
   emailSrcDoc,
 } from "@/components/mail/email-link-bridge";
-
-function splitAddresses(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-// "Name <a@b>" → "a@b"
-function bareAddress(raw: string): string {
-  const match = raw.match(/<([^>]+)>/);
-  return (match ? match[1] : raw).trim().toLowerCase();
-}
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -83,12 +71,12 @@ export function replyDraft(
   self: string,
 ): ComposeDraft {
   const notSelf = (addr: string) =>
-    bareAddress(addr) !== self &&
-    bareAddress(addr) !== bareAddress(body.replyTo);
+    recipientEmail(addr) !== recipientEmail(self) &&
+    recipientEmail(addr) !== recipientEmail(body.replyTo);
   const to = all
-    ? [body.replyTo, ...splitAddresses(body.to).filter(notSelf)]
+    ? [body.replyTo, ...splitAddressList(body.to).filter(Boolean).filter(notSelf)]
     : [body.replyTo];
-  const cc = all ? splitAddresses(body.cc).filter(notSelf) : [];
+  const cc = all ? splitAddressList(body.cc).filter(Boolean).filter(notSelf) : [];
   return {
     to: to.join(", "),
     cc: cc.join(", ") || undefined,
