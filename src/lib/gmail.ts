@@ -1,3 +1,4 @@
+import { splitAddressList } from '@/lib/recipients';
 import { useEffect } from 'react';
 import { sanitizeEmailHtml } from '@/lib/email-html';
 import { invoke } from '@tauri-apps/api/core';
@@ -984,19 +985,21 @@ function stripNewlines(value: string): string {
 // Reply drafts carry decoded display names ("Ann Öberg <a@b>"); re-encode any
 // non-ASCII name so the outgoing To/Cc/Bcc headers stay 7-bit clean.
 function encodeAddressList(raw: string): string {
-  return raw
-    .split(',')
-    .map((part) => part.trim())
+  return splitAddressList(raw)
     .filter(Boolean)
     .map((part) => {
       if (/^[\x20-\x7e]*$/.test(part)) {
         return part;
       }
-      const match = part.match(/^"?(.*?)"?\s*(<[^>]+>)$/);
+      const match = part.match(/^(.*?)\s*(<[^>]+>)$/);
       if (!match || !match[1]) {
         return part;
       }
-      return `${encodeHeaderValue(match[1])} ${match[2]}`;
+      const name =
+        match[1].startsWith('"') && match[1].endsWith('"')
+          ? match[1].slice(1, -1).replace(/\\(.)/g, '$1')
+          : match[1];
+      return `${encodeHeaderValue(name)} ${match[2]}`;
     })
     .join(', ');
 }

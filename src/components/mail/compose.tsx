@@ -1,3 +1,4 @@
+import { recipientEmail, splitAddressList } from '@/lib/recipients';
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -67,18 +68,6 @@ export function htmlToPlain(html: string): string {
   return new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '';
 }
 
-// The addresses a comma-separated recipient field already holds, whether
-// written bare ("a@b") or with a display name ("Ann <a@b>").
-function fieldEmails(field: string): string[] {
-  return field
-    .split(',')
-    .map((part) => {
-      const angled = part.match(/<([^>]*)>/);
-      return (angled ? angled[1] : part).trim().toLowerCase();
-    })
-    .filter(Boolean);
-}
-
 // Gmail-style @ mention: mentioning someone in the body adds them to To —
 // unless they're already a recipient anywhere (To/Cc/Bcc). Returns the new
 // To value.
@@ -89,7 +78,11 @@ export function addMentionedRecipient(
   contact: Contact,
 ): string {
   const email = contact.email.toLowerCase();
-  if ([to, cc, bcc].some((field) => fieldEmails(field).includes(email))) {
+  if (
+    [to, cc, bcc].some((field) =>
+      splitAddressList(field).some((part) => recipientEmail(part) === email),
+    )
+  ) {
     return to;
   }
   const base = to.replace(/[,\s]+$/, '');

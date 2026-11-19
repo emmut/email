@@ -1652,60 +1652,12 @@ fn smtp_send_blocking(
     in_reply_to: Option<&str>,
     references: Option<&str>,
 ) -> Result<(), String> {
-    use lettre::message::header::{ContentTransferEncoding, ContentType, InReplyTo, References};
-    use lettre::message::{Mailbox, MultiPart, SinglePart};
     use lettre::transport::smtp::authentication::Credentials;
-    use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+    use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 
-    let from_addr: Mailbox = from_email
-        .parse::<Mailbox>()
-        .map_err(|e| format!("invalid from address: {e}"))?;
-
-    let mut builder = Message::builder()
-        .from(from_addr)
-        .to(to.parse::<Mailbox>().map_err(|e| e.to_string())?)
-        .subject(subject);
-    if let Some(cc) = cc {
-        builder = builder.cc(cc.parse::<Mailbox>().map_err(|e| e.to_string())?);
-    }
-    if let Some(bcc) = bcc {
-        builder = builder.bcc(bcc.parse::<Mailbox>().map_err(|e| e.to_string())?);
-    }
-    if let Some(irt) = in_reply_to {
-        builder = builder.header(InReplyTo::from(irt.to_string()));
-    }
-    if let Some(refs) = references {
-        builder = builder.header(References::from(refs.to_string()));
-    }
-
-    let email = if let Some(html) = body_html {
-        builder
-            .multipart(
-                MultiPart::alternative()
-                    .singlepart(
-                        SinglePart::builder()
-                            .header(ContentType::TEXT_PLAIN)
-                            .header(ContentTransferEncoding::QuotedPrintable)
-                            .body(body_text.to_string()),
-                    )
-                    .singlepart(
-                        SinglePart::builder()
-                            .header(ContentType::TEXT_HTML)
-                            .header(ContentTransferEncoding::QuotedPrintable)
-                            .body(html.to_string()),
-                    ),
-            )
-            .map_err(|e| e.to_string())?
-    } else {
-        builder
-            .singlepart(
-                SinglePart::builder()
-                    .header(ContentType::TEXT_PLAIN)
-                    .header(ContentTransferEncoding::QuotedPrintable)
-                    .body(body_text.to_string()),
-            )
-            .map_err(|e| e.to_string())?
-    };
+    let email = crate::smtp::build_message(
+        from_email, to, cc, bcc, subject, body_text, body_html, in_reply_to, references,
+    )?;
 
     let creds = Credentials::new(config.email.clone(), config.app_password.clone());
     // Port 465 is implicit TLS; 587 (iCloud's default) requires STARTTLS.

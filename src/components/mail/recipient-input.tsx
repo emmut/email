@@ -3,19 +3,20 @@ import { useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { recipientEmail, splitAddressList } from '@/lib/recipients';
 import type { Contact } from '@/lib/gmail';
 
-// "Name <a@b>" list entry; quote the name if it would break the comma syntax.
+// "Name <a@b>" list entry; quote RFC address punctuation in display names.
 export function formatRecipient(c: Contact): string {
   if (!c.name || c.name === c.email) {
     return c.email;
   }
-  const name = /[,<>"]/.test(c.name) ? `"${c.name.replace(/"/g, '\\"')}"` : c.name;
+  const name = /[()<>\[\]:;@\\,."]/.test(c.name) ? `"${c.name.replace(/["\\]/g, '\\$&')}"` : c.name;
   return `${name} <${c.email}>`;
 }
 
 // Comma-separated recipient field with contact autocomplete on the token
-// being typed (the text after the last comma).
+// being typed after the last recipient separator.
 export function RecipientInput({
   value,
   onChange,
@@ -35,22 +36,14 @@ export function RecipientInput({
   const [highlighted, setHighlighted] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const lastComma = value.lastIndexOf(',');
-  const token = value
-    .slice(lastComma + 1)
-    .trim()
-    .toLowerCase();
+  const entries = splitAddressList(value);
+  const token = entries[entries.length - 1].toLowerCase();
 
   const suggestions = useMemo(() => {
     if (!token) {
       return [];
     }
-    const already = new Set(
-      value
-        .toLowerCase()
-        .split(',')
-        .map((s) => s.trim()),
-    );
+    const already = new Set(splitAddressList(value).slice(0, -1).map(recipientEmail));
     return contacts
       .filter(
         (c) =>
@@ -61,8 +54,8 @@ export function RecipientInput({
   }, [contacts, token, value]);
 
   function pick(contact: Contact) {
-    const kept = lastComma === -1 ? '' : `${value.slice(0, lastComma + 1)} `;
-    onChange(`${kept}${formatRecipient(contact)}, `);
+    const kept = entries.slice(0, -1).join(', ');
+    onChange(`${kept ? `${kept}, ` : ''}${formatRecipient(contact)}, `);
     setOpen(false);
   }
 

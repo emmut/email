@@ -1,18 +1,6 @@
+import { recipientEmail, splitAddressList } from '@/lib/recipients';
 import type { MailBody } from '@/lib/gmail';
 import type { ComposeDraft } from '@/components/mail/compose';
-
-function splitAddresses(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-// "Name <a@b>" → "a@b"
-function bareAddress(raw: string): string {
-  const match = raw.match(/<([^>]+)>/);
-  return (match ? match[1] : raw).trim().toLowerCase();
-}
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -33,11 +21,14 @@ function quoteOriginal(body: MailBody): string {
 export function replyDraft(body: MailBody, all: boolean, self: string): ComposeDraft {
   function notSelf(addr: string) {
     return (
-      bareAddress(addr) !== bareAddress(self) && bareAddress(addr) !== bareAddress(body.replyTo)
+      recipientEmail(addr) !== recipientEmail(self) &&
+      recipientEmail(addr) !== recipientEmail(body.replyTo)
     );
   }
-  const to = all ? [body.replyTo, ...splitAddresses(body.to).filter(notSelf)] : [body.replyTo];
-  const cc = all ? splitAddresses(body.cc).filter(notSelf) : [];
+  const to = all
+    ? [body.replyTo, ...splitAddressList(body.to).filter(Boolean).filter(notSelf)]
+    : [body.replyTo];
+  const cc = all ? splitAddressList(body.cc).filter(Boolean).filter(notSelf) : [];
   return {
     to: to.join(', '),
     cc: cc.join(', ') || undefined,

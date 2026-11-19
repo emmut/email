@@ -33,6 +33,22 @@ describe('replyDraft', () => {
     expect(draft.cc).toBe('Dave <dave@example.com>');
   });
 
+  it('reply-all drops whole quoted recipients without leaving name fragments', () => {
+    const draft = replyDraft(
+      mailBody({
+        replyTo: '"Sender, Alice" <alice@example.com>',
+        to: '"Self, Bob" <BOB@example.com>, "Other, Carol" <carol@example.com>',
+        cc: '"Sender, Alice" <alice@example.com>, "Other, Dave" <dave@example.com>',
+      }),
+      true,
+      'bob@example.com',
+    );
+    expect(draft.to).toBe(
+      '"Sender, Alice" <alice@example.com>, "Other, Carol" <carol@example.com>',
+    );
+    expect(draft.cc).toBe('"Other, Dave" <dave@example.com>');
+  });
+
   it('threads via In-Reply-To and appended References', () => {
     const draft = replyDraft(mailBody(), false, '');
     expect(draft.threadId).toBe('t1');

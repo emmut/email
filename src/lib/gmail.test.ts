@@ -93,6 +93,35 @@ describe('junk actions', () => {
 });
 
 describe('buildRfc822', () => {
+  it('encodes complete Unicode display names in every address header', () => {
+    const address = '"Öberg, Ann" <ann@example.com>';
+    const encoded = `=?UTF-8?B?${Buffer.from('Öberg, Ann').toString('base64')}?= <ann@example.com>`;
+    const mime = buildRfc822(
+      {
+        to: `${address}, bob@example.com, `,
+        cc: address,
+        bcc: address,
+        subject: 'Hi',
+        body: 'x',
+      },
+      address,
+    );
+    for (const field of ['From', 'Cc', 'Bcc']) {
+      expect(mime).toContain(`${field}: ${encoded}\r\n`);
+    }
+    expect(mime).toContain(`To: ${encoded}, bob@example.com\r\n`);
+  });
+
+  it('unescapes a quoted display name before RFC 2047 encoding', () => {
+    const mime = buildRfc822({
+      to: '"Öberg, Ann \\"A\\"" <ann@example.com>',
+      subject: 'Hi',
+      body: 'x',
+    });
+    const encoded = Buffer.from('Öberg, Ann "A"').toString('base64');
+    expect(mime).toContain(`To: =?UTF-8?B?${encoded}?= <ann@example.com>\r\n`);
+  });
+
   it('omits To when there is no recipient yet and adds From/Date when given', () => {
     const mime = buildRfc822({ to: '', subject: 'WIP', body: 'hello' }, 'me@icloud.com');
     expect(mime).toContain('From: me@icloud.com');
