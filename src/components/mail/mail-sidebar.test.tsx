@@ -138,9 +138,11 @@ describe("collapsed sidebar collections", () => {
     const user = userEvent.setup();
     renderSidebar({ tags: false });
     await user.click(screen.getByRole("button", { name: "Tags" }));
-    expect(screen.getByText("No tags yet")).toBeInTheDocument();
+    expect(await screen.findByText("No tags yet")).toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: "New tag" }));
-    expect(screen.getByRole("dialog", { name: "New tag" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("dialog", { name: "New tag" }),
+    ).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByPlaceholderText("Tag name")).toHaveFocus(),
     );
