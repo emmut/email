@@ -3,6 +3,7 @@ mod db;
 #[cfg(target_os = "linux")]
 mod linux_window;
 mod oauth;
+mod smtp;
 #[cfg(target_os = "macos")]
 mod updater;
 mod utf7;
