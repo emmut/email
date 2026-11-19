@@ -1,10 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SignaturePreview } from '@/components/ui/signature-preview';
 
 describe('signature visual editor', () => {
-  it('preserves the editing document and table layout as text is changed', () => {
+  it('preserves the editing document and table layout as text is changed', async () => {
     const original =
       '<table style="color: red"><tbody><tr><td>Jane</td><td><img src="https://example.com/logo.png" width="96"></td></tr></tbody></table>';
     const onChange = vi.fn();
@@ -15,8 +15,10 @@ describe('signature visual editor', () => {
     body.innerHTML = original;
     fireEvent.load(frame);
     expect(body.contentEditable).toBe('true');
+    // No input event: WebKit never delivers it to the sandboxed frame, so
+    // edits must be picked up from the DOM mutation alone.
     body.querySelector('td')!.textContent = 'Jane Doe';
-    fireEvent.input(body);
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
     const edited = onChange.mock.calls[0][0] as string;
     expect(edited).toContain('Jane Doe');
     expect(edited).toContain('style="color: red"');

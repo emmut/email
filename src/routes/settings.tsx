@@ -125,7 +125,7 @@ function SettingsPage() {
                 <p className="text-muted-foreground text-xs">
                   {section === 'rules'
                     ? "Each account keeps its own rules. Gmail rules run as filters on Google's servers; iCloud rules are applied by this app when new mail syncs."
-                    : 'Each account keeps its own signature, stored on this computer.'}{' '}
+                    : 'Signatures are stored on this computer and shared by all accounts; each account picks its own default.'}{' '}
                   Choosing an account here also makes it the active account in the mail view.
                 </p>
               )}
