@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1-alpha](https://github.com/emmut/email/compare/v0.2.0-alpha...v0.2.1-alpha) (2026-11-19)
+
+
+### Bug Fixes
+
+* make signature editing save reliably with a master-detail editor ([#48](https://github.com/emmut/email/issues/48)) ([5314d51](https://github.com/emmut/email/commit/5314d51dbeb719672bb28b162b696eb31af8c6b7))
+
 ## [0.2.0-alpha](https://github.com/emmut/email/compare/v0.1.7-alpha...v0.2.0-alpha) (2026-11-19)
 
 
