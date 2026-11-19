@@ -81,6 +81,13 @@ describe("addMentionedRecipient", () => {
     );
   });
 
+  it("recognizes a quoted local part containing a comma as one recipient", () => {
+    const contact: Contact = { ...ann, email: '"last,first"@example.com' };
+    expect(addMentionedRecipient("bo@x.com", contact.email, "", contact)).toBe(
+      "bo@x.com",
+    );
+  });
+
   it("does not confuse a similar address with the mentioned one", () => {
     expect(addMentionedRecipient("joann@x.com", "", "", ann)).toBe(
       "joann@x.com, Ann Andersson <ann@x.com>, ",
