@@ -50,6 +50,7 @@ import {
   type OutgoingMail,
 } from "@/lib/gmail";
 import { useSignature } from "@/lib/signature";
+import { signatureBlock } from "@/lib/signature-html";
 import {
   icloudContactsQuery,
   icloudSaveDraft,
@@ -71,27 +72,6 @@ export interface ComposeDraft {
   inReplyTo?: string;
   references?: string;
   forward?: boolean;
-}
-
-// Gmail signatures are <div> blocks with trailing <br>s and <div><br></div>
-// spacers. TipTap renders a trailing break as an extra blank line, and drops
-// empty <div>s entirely — so strip the breaks, and turn each spacer run into
-// a single <p></p> (which TipTap keeps as one blank line).
-export function tidySignature(html: string): string {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const isEmpty = (el: Element) =>
-    !el.textContent?.trim() && !el.querySelector("img");
-  const blocks = [...doc.body.querySelectorAll("div, p")];
-  for (const block of blocks) {
-    while (block.lastChild?.nodeName === "BR") block.lastChild.remove();
-  }
-  for (const block of blocks) {
-    if (!isEmpty(block)) continue;
-    const prev = block.previousElementSibling;
-    if (prev && /^(DIV|P)$/.test(prev.tagName) && isEmpty(prev)) block.remove();
-    else block.replaceWith(doc.createElement("p"));
-  }
-  return doc.body.innerHTML;
 }
 
 export function htmlToPlain(html: string): string {
@@ -267,7 +247,7 @@ function ComposeFields({
 
   const buildHtml = (sig: string) =>
     "<p></p>" +
-    (sig ? `<p></p><p>--</p>${tidySignature(sig)}` : "") +
+    (sig ? `<p></p><p>--</p>${signatureBlock(sig)}` : "") +
     (draft.bodyHtml ?? "");
   const [body, setBody] = useState(() => ({
     html: buildHtml(signature),

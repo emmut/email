@@ -22,6 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import { EmailSignature } from "@/components/ui/email-signature"
 import { Button } from "@/components/ui/button"
 import { useMention, type MentionConfig } from "@/components/ui/mention"
 import { Separator } from "@/components/ui/separator"
@@ -173,6 +174,7 @@ export function RichTextEditor({
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Image.configure({ inline: true }),
       Markdown,
+      EmailSignature,
       ...(mentionExtension ? [mentionExtension] : []),
     ],
     content: initialHtml ?? "",

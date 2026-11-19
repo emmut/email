@@ -2,7 +2,10 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
-import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { HtmlEditor } from "@/components/ui/html-editor";
+import { SignaturePreview } from "@/components/ui/signature-preview";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { sanitizeSignature } from "@/lib/signature-html";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAccount } from "@/context/AccountContext";
 import {
@@ -42,7 +45,7 @@ function SignatureEditor({
   // null until the user edits; empty text saves as "" (explicitly none).
   const [draft, setDraft] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  // Remount the editor after save/reset so it shows the persisted content.
+  const html = draft ?? signature;
   const [editorKey, setEditorKey] = useState(0);
 
   const refresh = () =>
@@ -53,16 +56,47 @@ function SignatureEditor({
       {isPending ? (
         <Skeleton className="h-44 w-full" />
       ) : (
-        <RichTextEditor
-          key={editorKey}
-          initialHtml={signature}
-          onChange={(html, text) => {
-            setSaved(false);
-            setDraft(text.trim() ? html : "");
-          }}
-        />
+        <Tabs defaultValue="visual">
+          <TabsList aria-label="Signature editor mode">
+            <TabsTrigger value="visual">Visual</TabsTrigger>
+            <TabsTrigger value="html">HTML</TabsTrigger>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
+          </TabsList>
+          <TabsContent value="visual">
+            <div className="overflow-hidden rounded-lg border bg-white p-2">
+              <SignaturePreview
+                key={editorKey}
+                html={html}
+                editable
+                onChange={(value) => {
+                  setSaved(false);
+                  setDraft(value);
+                }}
+              />
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">Edit text directly. Use HTML for layout and formatting.</p>
+          </TabsContent>
+          <TabsContent value="html">
+            <HtmlEditor
+              value={html}
+              onChange={(value) => {
+                setSaved(false);
+                setDraft(value);
+              }}
+            />
+          </TabsContent>
+          <TabsContent value="preview">
+            <div className="min-h-44 overflow-auto rounded-lg border bg-white p-2">
+              {html.trim() ? <SignaturePreview html={html} /> : (
+                <p className="p-3 text-sm text-gray-500">No signature. Add HTML in the HTML tab.</p>
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
       )}
       <p className="text-muted-foreground text-xs">
+        Tables, inline styles, links, and images are preserved. Preview uses a white email background.
+        <br />
         Saved on this computer for {email}.
         {isGoogle && " Without a local signature, the Gmail one is used."}
       </p>
@@ -76,9 +110,10 @@ function SignatureEditor({
             variant="outline"
             onClick={async () => {
               await clearLocalSignature(accountId);
-              refresh();
+              await refresh();
+              setEditorKey((key) => key + 1);
               setDraft(null);
-              setEditorKey((k) => k + 1);
+              setSaved(false);
             }}
           >
             Reset to Gmail signature
@@ -88,9 +123,11 @@ function SignatureEditor({
           type="button"
           disabled={isPending || draft === null}
           onClick={() => {
-            saveLocalSignature(accountId, draft ?? "");
-            refresh();
+            const sanitized = sanitizeSignature(draft ?? "");
+            saveLocalSignature(accountId, sanitized);
+            queryClient.setQueryData(["signature", accountId], sanitized);
             setDraft(null);
+            setEditorKey((key) => key + 1);
             setSaved(true);
           }}
         >
