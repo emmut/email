@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import {
   Archive,
   ArchiveX,
+  Check,
   ChevronsUpDown,
   File,
   Folder,
@@ -46,7 +47,10 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -62,6 +66,7 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from '@/components/ui/sidebar';
 import { folders } from '@/components/mail/data';
 import { useAccount } from '@/context/account-context';
@@ -98,6 +103,85 @@ const ICONS: Record<string, LucideIcon> = {
   archive: Archive,
 };
 
+function SidebarCollectionMenu({
+  label,
+  icon: Icon,
+  items,
+  activeFolder,
+  onSelectFolder,
+  onCreate,
+  createLabel,
+  createOpen,
+}: {
+  label: string;
+  icon: LucideIcon;
+  items: { id: string; name: string }[];
+  activeFolder: string;
+  onSelectFolder: (id: string) => void;
+  onCreate: () => void;
+  createLabel: string;
+  createOpen: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <SidebarGroup>
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <DropdownMenu open={open} onOpenChange={setOpen}>
+            <DropdownMenuTrigger
+              render={
+                <SidebarMenuButton
+                  aria-label={label}
+                  tooltip={{ children: label, hidden: open }}
+                  isActive={items.some((item) => item.id === activeFolder)}
+                >
+                  <Icon />
+                  <span>{label}</span>
+                </SidebarMenuButton>
+              }
+            />
+            <DropdownMenuContent
+              side="right"
+              align="start"
+              className="w-64"
+              // Let the creation dialog keep focus when it opens from this menu.
+              finalFocus={!createOpen}
+            >
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{label}</DropdownMenuLabel>
+                <div className="max-h-64 overflow-y-auto">
+                  {items.length === 0 && (
+                    <p className="px-1.5 py-3 text-sm text-muted-foreground">
+                      No {label.toLowerCase()} yet
+                    </p>
+                  )}
+                  {items.map((item) => (
+                    <DropdownMenuItem
+                      key={item.id}
+                      aria-current={item.id === activeFolder ? 'page' : undefined}
+                      onClick={() => onSelectFolder(item.id)}
+                    >
+                      <Icon />
+                      <span className="min-w-0 flex-1 break-words">{item.name}</span>
+                      {item.id === activeFolder && <Check className="ml-auto" />}
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onCreate}>
+                <Plus />
+                {createLabel}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    </SidebarGroup>
+  );
+}
+
 export function MailSidebar({
   activeFolder,
   onSelectFolder,
@@ -105,6 +189,8 @@ export function MailSidebar({
   activeFolder: string;
   onSelectFolder: (id: string) => void;
 }) {
+  const { state, isMobile } = useSidebar();
+  const collapsed = state === 'collapsed' && !isMobile;
   const queryClient = useQueryClient();
   const { accounts, activeAccount, activeAccountId, switchAccount, removeAccount, isLoading } =
     useAccount();
@@ -232,14 +318,22 @@ export function MailSidebar({
 
   if (isLoading) {
     return (
-      <Sidebar collapsible="icon">
-        <SidebarHeader data-tauri-drag-region className={cn(isMac && 'pt-8')}>
+      <Sidebar
+        collapsible="icon"
+        className={cn(
+          isMac && 'group-data-[collapsible=icon]:[&_[data-sidebar=menu-button]]:mx-auto',
+        )}
+      >
+        <SidebarHeader
+          data-tauri-drag-region={isMac ? 'deep' : true}
+          className={cn(isMac && 'pt-8')}
+        >
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg">
                 <div className="flex items-center gap-3">
                   <div className="h-8 w-8 rounded-lg bg-muted animate-pulse" />
-                  <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+                  <div className="h-4 w-24 bg-muted animate-pulse rounded group-data-[collapsible=icon]:hidden" />
                 </div>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -250,27 +344,32 @@ export function MailSidebar({
   }
 
   return (
-    <Sidebar collapsible="icon">
-      <SidebarHeader data-tauri-drag-region className={cn(isMac && 'pt-8')}>
+    <Sidebar
+      collapsible="icon"
+      className={cn(
+        isMac && 'group-data-[collapsible=icon]:[&_[data-sidebar=menu-button]]:mx-auto',
+      )}
+    >
+      <SidebarHeader data-tauri-drag-region={isMac ? 'deep' : true} className={cn(isMac && 'pt-8')}>
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
-                  <SidebarMenuButton size="lg" tooltip="Account">
-                    <Avatar className="size-8 rounded-lg">
+                  <SidebarMenuButton size="lg" tooltip="Account" aria-label="Account">
+                    <Avatar className="size-8 shrink-0 rounded-lg">
                       {avatar && <AvatarImage src={avatar} alt="" />}
                       <AvatarFallback className="bg-primary text-primary-foreground rounded-lg">
                         {email ? initialsFromEmail(email) : '…'}
                       </AvatarFallback>
                     </Avatar>
-                    <div className="grid flex-1 text-left text-sm leading-tight">
+                    <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
                       <span className="truncate font-medium">
                         {email ? email.split('@')[0] : 'Loading…'}
                       </span>
                       <span className="text-muted-foreground truncate text-xs">{email ?? ''}</span>
                     </div>
-                    <ChevronsUpDown className="ml-auto size-4" />
+                    <ChevronsUpDown className="ml-auto size-4 group-data-[collapsible=icon]:hidden" />
                   </SidebarMenuButton>
                 }
               />
@@ -319,7 +418,7 @@ export function MailSidebar({
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent data-tauri-drag-region={isMac ? 'deep' : undefined}>
         <SidebarGroup>
           <SidebarMenu>
             {folders.map((folder) => {
@@ -341,83 +440,116 @@ export function MailSidebar({
             })}
           </SidebarMenu>
         </SidebarGroup>
-        {!isIcloud && (
-          <SidebarGroup>
-            <SidebarGroupLabel>Tags</SidebarGroupLabel>
-            <SidebarGroupAction title="New tag" onClick={() => setNewTagOpen(true)}>
-              <Plus />
-            </SidebarGroupAction>
-            <SidebarMenu>
-              {(tags ?? []).map((tag) => {
-                const folderId = tagFolderId(tag.id);
-                return (
-                  <SidebarMenuItem key={tag.id}>
-                    <ContextMenu>
-                      <ContextMenuTrigger
-                        render={
-                          <SidebarMenuButton
-                            tooltip={tag.name}
-                            isActive={folderId === activeFolder}
-                            onClick={() => onSelectFolder(folderId)}
+        {!isIcloud &&
+          (collapsed ? (
+            <SidebarCollectionMenu
+              label="Tags"
+              icon={TagIcon}
+              items={(tags ?? []).map((tag) => ({
+                id: tagFolderId(tag.id),
+                name: tag.name,
+              }))}
+              activeFolder={activeFolder}
+              onSelectFolder={onSelectFolder}
+              onCreate={() => setNewTagOpen(true)}
+              createLabel="New tag"
+              createOpen={newTagOpen}
+            />
+          ) : (
+            <SidebarGroup>
+              <SidebarGroupLabel>Tags</SidebarGroupLabel>
+              <SidebarGroupAction title="New tag" onClick={() => setNewTagOpen(true)}>
+                <Plus />
+              </SidebarGroupAction>
+              <SidebarMenu>
+                {(tags ?? []).map((tag) => {
+                  const folderId = tagFolderId(tag.id);
+                  return (
+                    <SidebarMenuItem key={tag.id}>
+                      <ContextMenu>
+                        <ContextMenuTrigger
+                          render={
+                            <SidebarMenuButton
+                              tooltip={tag.name}
+                              isActive={folderId === activeFolder}
+                              onClick={() => onSelectFolder(folderId)}
+                            >
+                              <TagIcon />
+                              <span>{tag.name}</span>
+                            </SidebarMenuButton>
+                          }
+                        />
+                        <ContextMenuContent>
+                          <ContextMenuItem
+                            variant="destructive"
+                            onClick={() => setDeleteTarget(tag)}
                           >
-                            <TagIcon />
-                            <span>{tag.name}</span>
-                          </SidebarMenuButton>
-                        }
-                      />
-                      <ContextMenuContent>
-                        <ContextMenuItem variant="destructive" onClick={() => setDeleteTarget(tag)}>
-                          <Trash2 />
-                          Delete tag
-                        </ContextMenuItem>
-                      </ContextMenuContent>
-                    </ContextMenu>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroup>
-        )}
-        {isIcloud && (
-          <SidebarGroup>
-            <SidebarGroupLabel>Folders</SidebarGroupLabel>
-            <SidebarGroupAction title="New folder" onClick={() => setNewFolderOpen(true)}>
-              <Plus />
-            </SidebarGroupAction>
-            <SidebarMenu>
-              {(icloudFolders ?? []).map((name) => {
-                const folderId = icloudCustomFolderId(name);
-                return (
-                  <SidebarMenuItem key={name}>
-                    <ContextMenu>
-                      <ContextMenuTrigger
-                        render={
-                          <SidebarMenuButton
-                            tooltip={name}
-                            isActive={folderId === activeFolder}
-                            onClick={() => onSelectFolder(folderId)}
+                            <Trash2 />
+                            Delete tag
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroup>
+          ))}
+        {isIcloud &&
+          (collapsed ? (
+            <SidebarCollectionMenu
+              label="Folders"
+              icon={Folder}
+              items={(icloudFolders ?? []).map((name) => ({
+                id: icloudCustomFolderId(name),
+                name,
+              }))}
+              activeFolder={activeFolder}
+              onSelectFolder={onSelectFolder}
+              onCreate={() => setNewFolderOpen(true)}
+              createLabel="New folder"
+              createOpen={newFolderOpen}
+            />
+          ) : (
+            <SidebarGroup>
+              <SidebarGroupLabel>Folders</SidebarGroupLabel>
+              <SidebarGroupAction title="New folder" onClick={() => setNewFolderOpen(true)}>
+                <Plus />
+              </SidebarGroupAction>
+              <SidebarMenu>
+                {(icloudFolders ?? []).map((name) => {
+                  const folderId = icloudCustomFolderId(name);
+                  return (
+                    <SidebarMenuItem key={name}>
+                      <ContextMenu>
+                        <ContextMenuTrigger
+                          render={
+                            <SidebarMenuButton
+                              tooltip={name}
+                              isActive={folderId === activeFolder}
+                              onClick={() => onSelectFolder(folderId)}
+                            >
+                              <Folder />
+                              <span>{name}</span>
+                            </SidebarMenuButton>
+                          }
+                        />
+                        <ContextMenuContent>
+                          <ContextMenuItem
+                            variant="destructive"
+                            onClick={() => setDeleteFolderTarget(name)}
                           >
-                            <Folder />
-                            <span>{name}</span>
-                          </SidebarMenuButton>
-                        }
-                      />
-                      <ContextMenuContent>
-                        <ContextMenuItem
-                          variant="destructive"
-                          onClick={() => setDeleteFolderTarget(name)}
-                        >
-                          <Trash2 />
-                          Delete folder
-                        </ContextMenuItem>
-                      </ContextMenuContent>
-                    </ContextMenu>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroup>
-        )}
+                            <Trash2 />
+                            Delete folder
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroup>
+          ))}
         {(!online || pendingCount > 0) && (
           <SidebarGroup className="mt-auto">
             <div className="text-muted-foreground flex items-center gap-2 px-2 py-1 text-xs">
