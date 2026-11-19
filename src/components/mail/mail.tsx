@@ -361,10 +361,10 @@ export function Mail() {
 
   return (
     <SidebarProvider
-      // Keep all three native traffic lights inside the collapsed rail.
+      // The native macOS controls span 54 px with an 8 px inset on each side.
       style={
         isMac
-          ? ({ "--sidebar-width-icon": "5.5rem" } as CSSProperties)
+          ? ({ "--sidebar-width-icon": "70px" } as CSSProperties)
           : undefined
       }
     >
@@ -380,7 +380,7 @@ export function Mail() {
           className="flex h-full flex-col gap-0"
         >
           <header
-            data-tauri-drag-region
+            data-tauri-drag-region={isMac ? "deep" : true}
             className="flex items-center gap-2 px-4 py-2"
           >
             <SidebarTrigger />

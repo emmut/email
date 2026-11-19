@@ -6,7 +6,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MailSidebar } from "@/components/mail/mail-sidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
-const account = vi.hoisted(() => ({ kind: "google", isMobile: false }));
+const account = vi.hoisted(() => ({
+  kind: "google",
+  isMobile: false,
+  isMac: false,
+}));
+
+vi.mock("@/lib/utils", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/utils")>()),
+  get isMac() {
+    return account.isMac;
+  },
+}));
 
 vi.mock("@/context/AccountContext", () => ({
   useAccount: () => ({
@@ -42,7 +53,7 @@ function renderSidebar({ expanded = false, tags = true } = {}) {
   client.setQueryData(["icloud", "avatar", "e@example.com"], "");
   client.setQueryData(["ops"], []);
   const onSelectFolder = vi.fn();
-  render(
+  const { container } = render(
     <QueryClientProvider client={client}>
       <SidebarProvider defaultOpen={expanded}>
         <MailSidebar
@@ -53,15 +64,42 @@ function renderSidebar({ expanded = false, tags = true } = {}) {
       </SidebarProvider>
     </QueryClientProvider>,
   );
-  return { onSelectFolder };
+  return { onSelectFolder, container };
 }
 
 beforeEach(() => {
   account.kind = "google";
   account.isMobile = false;
+  account.isMac = false;
 });
 
 describe("collapsed sidebar collections", () => {
+  it("makes the macOS sidebar chrome draggable without marking its buttons", () => {
+    account.isMac = true;
+    const { container } = renderSidebar();
+    expect(container.querySelector('[data-sidebar="header"]')).toHaveAttribute(
+      "data-tauri-drag-region",
+      "deep",
+    );
+    expect(container.querySelector('[data-sidebar="content"]')).toHaveAttribute(
+      "data-tauri-drag-region",
+      "deep",
+    );
+    for (const button of screen.getAllByRole("button")) {
+      expect(button).not.toHaveAttribute("data-tauri-drag-region");
+    }
+  });
+
+  it("keeps the additional drag regions off other platforms", () => {
+    const { container } = renderSidebar();
+    expect(
+      container.querySelector('[data-sidebar="content"]'),
+    ).not.toHaveAttribute("data-tauri-drag-region");
+    expect(
+      container.querySelector('[data-tauri-drag-region="deep"]'),
+    ).not.toBeInTheDocument();
+  });
+
   it("replaces individual tags with one flyout and navigates to a named tag", async () => {
     const user = userEvent.setup();
     const { onSelectFolder } = renderSidebar();

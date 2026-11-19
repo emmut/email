@@ -332,9 +332,15 @@ export function MailSidebar({
     return (
       <Sidebar
         collapsible="icon"
-        className="group-data-[collapsible=icon]:[&_[data-sidebar=menu-button]]:mx-auto"
+        className={cn(
+          isMac &&
+            "group-data-[collapsible=icon]:[&_[data-sidebar=menu-button]]:mx-auto",
+        )}
       >
-        <SidebarHeader data-tauri-drag-region className={cn(isMac && "pt-8")}>
+        <SidebarHeader
+          data-tauri-drag-region={isMac ? "deep" : true}
+          className={cn(isMac && "pt-8")}
+        >
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg">
@@ -353,9 +359,15 @@ export function MailSidebar({
   return (
     <Sidebar
       collapsible="icon"
-      className="group-data-[collapsible=icon]:[&_[data-sidebar=menu-button]]:mx-auto"
+      className={cn(
+        isMac &&
+          "group-data-[collapsible=icon]:[&_[data-sidebar=menu-button]]:mx-auto",
+      )}
     >
-      <SidebarHeader data-tauri-drag-region className={cn(isMac && "pt-8")}>
+      <SidebarHeader
+        data-tauri-drag-region={isMac ? "deep" : true}
+        className={cn(isMac && "pt-8")}
+      >
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
@@ -437,7 +449,7 @@ export function MailSidebar({
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent data-tauri-drag-region={isMac ? "deep" : undefined}>
         <SidebarGroup>
           <SidebarMenu>
             {folders.map((folder) => {
