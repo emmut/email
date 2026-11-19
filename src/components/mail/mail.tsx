@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   Archive,
   MailOpen,
@@ -78,7 +78,7 @@ import {
   toMail,
 } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
-import { errMessage, nextSelectedId } from "@/lib/utils";
+import { errMessage, isMac, nextSelectedId } from "@/lib/utils";
 import { useOfflineQueue } from "@/lib/offline";
 import { useNewMailNotifications } from "@/lib/notifications";
 
@@ -360,7 +360,14 @@ export function Mail() {
   });
 
   return (
-    <SidebarProvider>
+    <SidebarProvider
+      // The native macOS controls span 54 px with an 8 px inset on each side.
+      style={
+        isMac
+          ? ({ "--sidebar-width-icon": "70px" } as CSSProperties)
+          : undefined
+      }
+    >
       <MailSidebar activeFolder={activeFolder} onSelectFolder={selectFolder} />
       <SidebarInset className="h-screen overflow-hidden">
         <Tabs
@@ -373,7 +380,7 @@ export function Mail() {
           className="flex h-full flex-col gap-0"
         >
           <header
-            data-tauri-drag-region
+            data-tauri-drag-region={isMac ? "deep" : true}
             className="flex items-center gap-2 px-4 py-2"
           >
             <SidebarTrigger />
