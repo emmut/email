@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from 'react';
 import {
   Archive,
   MailOpen,
@@ -9,8 +9,8 @@ import {
   SquarePen,
   Trash2,
   X,
-} from "lucide-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+} from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   AlertDialog,
@@ -21,44 +21,28 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Kbd } from "@/components/ui/kbd";
-import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
-import { MailSidebar } from "@/components/mail/mail-sidebar";
-import { ComposeDialog, type ComposeDraft } from "@/components/mail/compose";
-import { MailList } from "@/components/mail/mail-list";
-import { MailDisplay } from "@/components/mail/mail-display";
-import type { Mail as MailItem } from "@/components/mail/data";
-import { ShortcutsHelp } from "@/components/mail/shortcuts-help";
-import { CommandPalette } from "@/components/mail/command-palette";
-import { useKeyboardShortcuts } from "@/hooks/use-shortcuts";
-import { syncIntervalMs, useKeys, useSettings } from "@/lib/settings";
-import { noDialogOpen, useMenuEvents } from "@/hooks/use-menu";
-import { folders } from "@/components/mail/data";
-import {
-  useMailActions,
-  type JunkAction,
-  type MailAction,
-} from "@/hooks/use-mail-actions";
+} from '@/components/ui/alert-dialog';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Kbd } from '@/components/ui/kbd';
+import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
+import { MailSidebar } from '@/components/mail/mail-sidebar';
+import { ComposeDialog, type ComposeDraft } from '@/components/mail/compose';
+import { MailList } from '@/components/mail/mail-list';
+import { MailDisplay } from '@/components/mail/mail-display';
+import type { Mail as MailItem } from '@/components/mail/data';
+import { ShortcutsHelp } from '@/components/mail/shortcuts-help';
+import { CommandPalette } from '@/components/mail/command-palette';
+import { useKeyboardShortcuts } from '@/hooks/use-shortcuts';
+import { syncIntervalMs, useKeys, useSettings } from '@/lib/settings';
+import { noDialogOpen, useMenuEvents } from '@/hooks/use-menu';
+import { folders } from '@/components/mail/data';
+import { useMailActions, type JunkAction, type MailAction } from '@/hooks/use-mail-actions';
 import {
   emptyTrash,
   gmailCachedListQuery,
@@ -66,7 +50,7 @@ import {
   tagIdFromFolder,
   tagsQuery,
   useGmailSync,
-} from "@/lib/gmail";
+} from '@/lib/gmail';
 import {
   ICLOUD_FOLDER_NAMES,
   icloudEmptyFolder,
@@ -76,19 +60,19 @@ import {
   icloudMessagesQuery,
   icloudSearchQuery,
   toMail,
-} from "@/lib/icloud";
-import { useAccount } from "@/context/AccountContext";
-import { errMessage, nextSelectedId } from "@/lib/utils";
-import { useOfflineQueue } from "@/lib/offline";
-import { useNewMailNotifications } from "@/lib/notifications";
+} from '@/lib/icloud';
+import { useAccount } from '@/context/account-context';
+import { errMessage, nextSelectedId } from '@/lib/utils';
+import { useOfflineQueue } from '@/lib/offline';
+import { useNewMailNotifications } from '@/lib/notifications';
 
 export function Mail() {
   const keys = useKeys();
-  const [activeFolder, setActiveFolder] = useState("inbox");
+  const [activeFolder, setActiveFolder] = useState('inbox');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tab, setTab] = useState<"all" | "unread">("all");
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [tab, setTab] = useState<'all' | 'unread'>('all');
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [composeDraft, setComposeDraft] = useState<ComposeDraft | null>(null);
   // Emails read while the unread tab is open stay listed until the view changes
   const [keptReadIds, setKeptReadIds] = useState<Set<string>>(new Set());
@@ -102,24 +86,16 @@ export function Mail() {
   const searchRef = useRef<HTMLInputElement>(null);
 
   const { activeAccount } = useAccount();
-  const isIcloud = activeAccount?.kind === "icloud";
-  const inTrash = activeFolder === "trash";
+  const isIcloud = activeAccount?.kind === 'icloud';
+  const inTrash = activeFolder === 'trash';
   // Junk is a verdict on received mail: the junk folder offers the rescue,
   // drafts offer nothing, everywhere else offers the report.
   const junkAction: JunkAction =
-    activeFolder === "drafts"
-      ? null
-      : activeFolder === "junk"
-        ? "notJunk"
-        : "junk";
+    activeFolder === 'drafts' ? null : activeFolder === 'junk' ? 'notJunk' : 'junk';
 
   const { settings } = useSettings();
   const syncMs = syncIntervalMs(settings);
-  useGmailSync(
-    !isIcloud && syncMs !== false,
-    syncMs || undefined,
-    activeAccount?.id,
-  );
+  useGmailSync(!isIcloud && syncMs !== false, syncMs || undefined, activeAccount?.id);
   useOfflineQueue();
 
   useEffect(() => {
@@ -127,21 +103,14 @@ export function Mail() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const gmailList = mailListQuery(
-    activeFolder,
-    debouncedSearch,
-    activeAccount?.id,
-  );
+  const gmailList = mailListQuery(activeFolder, debouncedSearch, activeAccount?.id);
   const gmailQuery = useQuery({ ...gmailList, enabled: !isIcloud });
   // Cached copy of the folder painted while the network listing loads.
   const gmailLocal = useQuery({
     ...gmailCachedListQuery(activeFolder, activeAccount?.id),
     enabled: !isIcloud && !debouncedSearch,
   });
-  const icloudList = icloudMessagesQuery(
-    activeAccount?.id ?? "",
-    icloudFolderName(activeFolder),
-  );
+  const icloudList = icloudMessagesQuery(activeAccount?.id ?? '', icloudFolderName(activeFolder));
   const icloudQuery = useQuery({
     ...icloudList,
     enabled: isIcloud,
@@ -149,36 +118,23 @@ export function Mail() {
     select: (msgs) => msgs.map(toMail),
   });
   const icloudLocal = useQuery({
-    ...icloudLocalMessagesQuery(
-      activeAccount?.id ?? "",
-      icloudFolderName(activeFolder),
-    ),
+    ...icloudLocalMessagesQuery(activeAccount?.id ?? '', icloudFolderName(activeFolder)),
     enabled: isIcloud,
     select: (msgs) => msgs.map(toMail),
   });
   // Server-side full-mailbox search; the client filter over the cached page
   // stands in while it loads (or offline).
   const icloudSearch = useQuery({
-    ...icloudSearchQuery(
-      activeAccount?.id ?? "",
-      icloudFolderName(activeFolder),
-      debouncedSearch,
-    ),
+    ...icloudSearchQuery(activeAccount?.id ?? '', icloudFolderName(activeFolder), debouncedSearch),
     enabled: isIcloud && !!debouncedSearch,
     select: (msgs) => msgs.map(toMail),
   });
 
-  const matchesSearch = (m: MailItem) => {
+  function matchesSearch(m: MailItem) {
     const q = debouncedSearch.toLowerCase();
-    return [m.name, m.email, m.subject, m.text].some((s) =>
-      s.toLowerCase().includes(q),
-    );
-  };
-  const networkQuery = isIcloud
-    ? debouncedSearch
-      ? icloudSearch
-      : icloudQuery
-    : gmailQuery;
+    return [m.name, m.email, m.subject, m.text].some((s) => s.toLowerCase().includes(q));
+  }
+  const networkQuery = isIcloud ? (debouncedSearch ? icloudSearch : icloudQuery) : gmailQuery;
   // Cache is a fallback, not truth: only stand in while the network query has
   // nothing, and only if it actually holds messages.
   let listData: MailItem[] | undefined;
@@ -186,21 +142,18 @@ export function Mail() {
     const cached = icloudQuery.data ?? icloudLocal.data;
     listData = debouncedSearch
       ? (icloudSearch.data ?? cached?.filter(matchesSearch))
-      : (icloudQuery.data ??
-        (icloudLocal.data?.length ? icloudLocal.data : undefined));
+      : (icloudQuery.data ?? (icloudLocal.data?.length ? icloudLocal.data : undefined));
   } else {
     listData =
       gmailQuery.data ??
-      (!debouncedSearch && gmailLocal.data?.length
-        ? gmailLocal.data
-        : undefined);
+      (!debouncedSearch && gmailLocal.data?.length ? gmailLocal.data : undefined);
   }
   const mails = listData;
   // Gmail announces new mail from its background history sync; iCloud has no
   // delta channel, so notify by diffing the polled inbox listing.
   useNewMailNotifications(
-    activeAccount?.id ?? "",
-    isIcloud && activeFolder === "inbox" ? mails : undefined,
+    activeAccount?.id ?? '',
+    isIcloud && activeFolder === 'inbox' ? mails : undefined,
   );
   const isPending = networkQuery.isPending && listData === undefined;
   const isError = networkQuery.isError && listData === undefined;
@@ -217,36 +170,34 @@ export function Mail() {
         ? icloudEmptyFolder(activeAccount.id, ICLOUD_FOLDER_NAMES.trash)
         : emptyTrash(activeAccount?.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["gmail", activeAccount?.id] });
+      queryClient.invalidateQueries({ queryKey: ['gmail', activeAccount?.id] });
       queryClient.invalidateQueries({
-        queryKey: ["icloud", activeAccount?.id],
+        queryKey: ['icloud', activeAccount?.id],
       });
       setSelectedId(null);
       setCheckedIds(new Set());
     },
   });
 
-  const selectFolder = (folder: string) => {
+  function selectFolder(folder: string) {
     setActiveFolder(folder);
     setSelectedId(null);
     setKeptReadIds(new Set());
     setCheckedIds(new Set());
-  };
+  }
 
-  const selectMail = (id: string) => {
+  function selectMail(id: string) {
     setSelectedId(id);
     const mail = mails?.find((m) => m.id === id);
     if (mail && !mail.read) {
-      if (tab === "unread") {
+      if (tab === 'unread') {
         setKeptReadIds((prev) => new Set(prev).add(id));
       }
-      act("read", id);
+      act('read', id);
     }
-  };
+  }
 
-  const items = (mails ?? []).filter(
-    (m) => tab === "all" || !m.read || keptReadIds.has(m.id),
-  );
+  const items = (mails ?? []).filter((m) => tab === 'all' || !m.read || keptReadIds.has(m.id));
   const selected = mails?.find((m) => m.id === selectedId) ?? null;
 
   // Archiving/trashing the open mail advances the selection to the next mail
@@ -258,18 +209,23 @@ export function Mail() {
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
   function handleRemoved(id: string) {
-    if (selectedIdRef.current !== id) return;
+    if (selectedIdRef.current !== id) {
+      return;
+    }
     const next = nextSelectedId(
       itemsRef.current.map((m) => m.id),
       id,
     );
     selectedIdRef.current = next;
-    if (next) selectMail(next);
-    else setSelectedId(null);
+    if (next) {
+      selectMail(next);
+    } else {
+      setSelectedId(null);
+    }
   }
 
   // Checkbox/Cmd+click toggles one; Shift+click extends from the last toggle.
-  const toggleCheck = (id: string, range: boolean) => {
+  function toggleCheck(id: string, range: boolean) {
     setCheckedIds((prev) => {
       const next = new Set(prev);
       const anchor = checkAnchor.current;
@@ -277,26 +233,30 @@ export function Mail() {
         const a = items.findIndex((m) => m.id === anchor);
         const b = items.findIndex((m) => m.id === id);
         if (a !== -1 && b !== -1) {
-          for (let i = Math.min(a, b); i <= Math.max(a, b); i++)
-            next.add(items[i].id);
+          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(items[i].id);
           return next;
         }
       }
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
     checkAnchor.current = id;
-  };
+  }
 
   // Read/unread keeps the selection (chainable); archive/trash consumes it.
-  const actChecked = (action: MailAction) => {
-    if (action === "read" && tab === "unread") {
+  function actChecked(action: MailAction) {
+    if (action === 'read' && tab === 'unread') {
       setKeptReadIds((prev) => new Set([...prev, ...checkedIds]));
     }
     for (const id of checkedIds) act(action, id);
-    if (action !== "read" && action !== "unread") setCheckedIds(new Set());
-  };
+    if (action !== 'read' && action !== 'unread') {
+      setCheckedIds(new Set());
+    }
+  }
 
   const { data: tags } = useQuery({
     ...tagsQuery(activeAccount?.id),
@@ -304,11 +264,13 @@ export function Mail() {
   });
   const activeTagId = tagIdFromFolder(activeFolder);
   const title = activeTagId
-    ? (tags?.find((t) => t.id === activeTagId)?.name ?? "Tag")
+    ? (tags?.find((t) => t.id === activeTagId)?.name ?? 'Tag')
     : (icloudMailboxFromFolder(activeFolder) ?? activeFolder);
 
-  const moveSelection = (delta: number) => {
-    if (!items.length) return;
+  function moveSelection(delta: number) {
+    if (!items.length) {
+      return;
+    }
     const index = items.findIndex((m) => m.id === selectedId);
     const next =
       index === -1
@@ -317,7 +279,7 @@ export function Mail() {
           : items.length - 1
         : Math.min(items.length - 1, Math.max(0, index + delta));
     selectMail(items[next].id);
-  };
+  }
 
   useKeyboardShortcuts({
     [keys.compose]: () => setComposeDraft({}),
@@ -325,16 +287,25 @@ export function Mail() {
     [keys.prevMessage]: () => moveSelection(-1),
     [keys.search]: () => searchRef.current?.focus(),
     [keys.markUnread]: () => {
-      if (checkedIds.size) actChecked("unread");
-      else if (selected?.read) act("unread", selected.id);
+      if (checkedIds.size) {
+        actChecked('unread');
+      } else if (selected?.read) {
+        act('unread', selected.id);
+      }
     },
     [keys.markRead]: () => {
-      if (checkedIds.size) actChecked("read");
-      else if (selected && !selected.read) act("read", selected.id);
+      if (checkedIds.size) {
+        actChecked('read');
+      } else if (selected && !selected.read) {
+        act('read', selected.id);
+      }
     },
     Escape: () => {
-      if (checkedIds.size) setCheckedIds(new Set());
-      else setSelectedId(null);
+      if (checkedIds.size) {
+        setCheckedIds(new Set());
+      } else {
+        setSelectedId(null);
+      }
     },
     [keys.help]: () => setHelpOpen(true),
   });
@@ -344,19 +315,14 @@ export function Mail() {
   useMenuEvents({
     compose: () => noDialogOpen() && setComposeDraft({}),
     shortcuts: () => setHelpOpen(true),
-    undo: () => document.execCommand("undo"),
-    redo: () => document.execCommand("redo"),
-    archive: () => noDialogOpen() && selected && act("archive", selected.id),
+    undo: () => document.execCommand('undo'),
+    redo: () => document.execCommand('redo'),
+    archive: () => noDialogOpen() && selected && act('archive', selected.id),
     // "trash" is handled in MailDisplay (it owns the permanent-delete confirm).
-    toggle_junk: () =>
-      noDialogOpen() && selected && junkAction && act(junkAction, selected.id),
+    toggle_junk: () => noDialogOpen() && selected && junkAction && act(junkAction, selected.id),
     toggle_read: () =>
-      noDialogOpen() &&
-      selected &&
-      act(selected.read ? "unread" : "read", selected.id),
-    ...Object.fromEntries(
-      folders.map((f) => [`go_${f.id}`, () => selectFolder(f.id)]),
-    ),
+      noDialogOpen() && selected && act(selected.read ? 'unread' : 'read', selected.id),
+    ...Object.fromEntries(folders.map((f) => [`go_${f.id}`, () => selectFolder(f.id)])),
   });
 
   return (
@@ -366,16 +332,13 @@ export function Mail() {
         <Tabs
           value={tab}
           onValueChange={(v) => {
-            setTab(v as "all" | "unread");
+            setTab(v as 'all' | 'unread');
             setKeptReadIds(new Set());
             setCheckedIds(new Set());
           }}
           className="flex h-full flex-col gap-0"
         >
-          <header
-            data-tauri-drag-region
-            className="flex items-center gap-2 px-4 py-2"
-          >
+          <header data-tauri-drag-region className="flex items-center gap-2 px-4 py-2">
             <SidebarTrigger />
             <h1 className="text-xl font-bold capitalize">{title}</h1>
             <Button
@@ -396,7 +359,7 @@ export function Mail() {
                 onClick={() => setConfirmEmptyTrash(true)}
               >
                 <Trash2 className="size-4" />
-                {emptyTrashMutation.isPending ? "Emptying…" : "Empty trash"}
+                {emptyTrashMutation.isPending ? 'Emptying…' : 'Empty trash'}
               </Button>
             )}
             <TabsList className="ml-auto">
@@ -415,7 +378,9 @@ export function Mail() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Escape") e.currentTarget.blur();
+                  if (e.key === 'Escape') {
+                    e.currentTarget.blur();
+                  }
                 }}
               />
             </div>
@@ -426,16 +391,13 @@ export function Mail() {
               <div className="flex h-full flex-col">
                 {(actError || emptyTrashMutation.error) && (
                   <p className="text-destructive border-b px-4 py-2 text-xs">
-                    Action failed:{" "}
-                    {errMessage(actError ?? emptyTrashMutation.error)}
+                    Action failed: {errMessage(actError ?? emptyTrashMutation.error)}
                   </p>
                 )}
                 {checkedIds.size > 0 && (
                   <>
                     <div className="flex items-center gap-1 px-4 py-1">
-                      <span className="text-sm font-medium">
-                        {checkedIds.size} selected
-                      </span>
+                      <span className="text-sm font-medium">{checkedIds.size} selected</span>
                       <div className="ml-auto flex items-center">
                         <Tooltip>
                           <TooltipTrigger
@@ -443,7 +405,7 @@ export function Mail() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => actChecked("archive")}
+                                onClick={() => actChecked('archive')}
                               >
                                 <Archive className="size-4" />
                               </Button>
@@ -458,10 +420,13 @@ export function Mail() {
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => {
-                                  if (!inTrash) actChecked("trash");
-                                  else if (settings.confirmPermanentDelete)
+                                  if (!inTrash) {
+                                    actChecked('trash');
+                                  } else if (settings.confirmPermanentDelete) {
                                     setConfirmDeleteChecked(true);
-                                  else actChecked("delete");
+                                  } else {
+                                    actChecked('delete');
+                                  }
                                 }}
                               >
                                 <Trash2 className="size-4" />
@@ -469,7 +434,7 @@ export function Mail() {
                             }
                           />
                           <TooltipContent>
-                            {inTrash ? "Delete permanently" : "Move to trash"}
+                            {inTrash ? 'Delete permanently' : 'Move to trash'}
                           </TooltipContent>
                         </Tooltip>
                         {junkAction && (
@@ -481,7 +446,7 @@ export function Mail() {
                                   size="icon"
                                   onClick={() => actChecked(junkAction)}
                                 >
-                                  {junkAction === "notJunk" ? (
+                                  {junkAction === 'notJunk' ? (
                                     <ShieldCheck className="size-4" />
                                   ) : (
                                     <ShieldAlert className="size-4" />
@@ -490,9 +455,7 @@ export function Mail() {
                               }
                             />
                             <TooltipContent>
-                              {junkAction === "notJunk"
-                                ? "Mark as not junk"
-                                : "Mark as junk"}
+                              {junkAction === 'notJunk' ? 'Mark as not junk' : 'Mark as junk'}
                             </TooltipContent>
                           </Tooltip>
                         )}
@@ -502,7 +465,7 @@ export function Mail() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => actChecked("read")}
+                                onClick={() => actChecked('read')}
                               >
                                 <MailOpen className="size-4" />
                               </Button>
@@ -518,7 +481,7 @@ export function Mail() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => actChecked("unread")}
+                                onClick={() => actChecked('unread')}
                               >
                                 <MailX className="size-4" />
                               </Button>
@@ -554,14 +517,8 @@ export function Mail() {
                     <MailListSkeleton />
                   ) : isError ? (
                     <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm">
-                      <p className="text-muted-foreground">
-                        Failed to load mail: {error?.message}
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => refetch()}
-                      >
+                      <p className="text-muted-foreground">Failed to load mail: {error?.message}</p>
+                      <Button variant="outline" size="sm" onClick={() => refetch()}>
                         Retry
                       </Button>
                     </div>
@@ -595,41 +552,30 @@ export function Mail() {
             </ResizablePanel>
           </ResizablePanelGroup>
         </Tabs>
-        <ComposeDialog
-          draft={composeDraft}
-          onClose={() => setComposeDraft(null)}
-        />
-        <AlertDialog
-          open={confirmDeleteChecked}
-          onOpenChange={setConfirmDeleteChecked}
-        >
+        <ComposeDialog draft={composeDraft} onClose={() => setComposeDraft(null)} />
+        <AlertDialog open={confirmDeleteChecked} onOpenChange={setConfirmDeleteChecked}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Delete permanently?</AlertDialogTitle>
               <AlertDialogDescription>
                 {checkedIds.size} message
-                {checkedIds.size === 1 ? " is" : "s are"} deleted forever. This
-                cannot be undone.
+                {checkedIds.size === 1 ? ' is' : 's are'} deleted forever. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => actChecked("delete")}>
+              <AlertDialogAction onClick={() => actChecked('delete')}>
                 Delete permanently
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-        <AlertDialog
-          open={confirmEmptyTrash}
-          onOpenChange={setConfirmEmptyTrash}
-        >
+        <AlertDialog open={confirmEmptyTrash} onOpenChange={setConfirmEmptyTrash}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Empty trash?</AlertDialogTitle>
               <AlertDialogDescription>
-                Every message in Trash is deleted forever. This cannot be
-                undone.
+                Every message in Trash is deleted forever. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -649,9 +595,7 @@ export function Mail() {
           onSelectFolder={selectFolder}
           onCompose={() => setComposeDraft({})}
           // Wait out the dialog's close (Radix restores focus on unmount).
-          onFocusSearch={() =>
-            setTimeout(() => searchRef.current?.focus(), 250)
-          }
+          onFocusSearch={() => setTimeout(() => searchRef.current?.focus(), 250)}
           onShowShortcuts={() => setHelpOpen(true)}
           onSetTab={(t) => {
             setTab(t);

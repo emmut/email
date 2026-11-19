@@ -1,12 +1,12 @@
-import { invoke } from "@tauri-apps/api/core";
-import { cacheGet, cachePut } from "@/lib/cache";
+import { invoke } from '@tauri-apps/api/core';
+import { cacheGet, cachePut } from '@/lib/cache';
 import {
   loadRules,
   maxUid,
   planIcloudMoves,
   selectNewMessages,
   type IcloudRuleInput,
-} from "@/lib/rules";
+} from '@/lib/rules';
 
 // Sync-time rule engine for iCloud (which has no server-side rules API).
 // Runs after each successful inbox sync: evaluates the account's rules
@@ -17,15 +17,19 @@ import {
 // Talks to the Tauri commands directly (not through icloud.ts) to keep the
 // module dependency graph acyclic: icloud.ts imports this file.
 
-const cursorKey = (accountId: string) => `rules:cursor:v1:${accountId}`;
+function cursorKey(accountId: string) {
+  return `rules:cursor:v1:${accountId}`;
+}
 
 export async function runIcloudRules(accountId: string): Promise<void> {
   const rules = (await loadRules(accountId)).filter((r) => r.enabled);
-  if (!rules.length) return;
+  if (!rules.length) {
+    return;
+  }
 
-  const messages = await invoke<IcloudRuleInput[]>("icloud_cached_messages", {
+  const messages = await invoke<IcloudRuleInput[]>('icloud_cached_messages', {
     account_id: accountId,
-    folder: "INBOX",
+    folder: 'INBOX',
     limit: 50,
   });
   const top = maxUid(messages);
@@ -40,17 +44,17 @@ export async function runIcloudRules(accountId: string): Promise<void> {
   const moves = planIcloudMoves(selectNewMessages(messages, cursor), rules);
   for (const move of moves) {
     try {
-      await invoke("icloud_move_message", {
+      await invoke('icloud_move_message', {
         account_id: accountId,
-        folder: "INBOX",
+        folder: 'INBOX',
         uid: move.uid,
         target_folder: move.targetFolder,
       });
       // Drop it from the cached inbox immediately so the listing that follows
       // the sync never shows the moved message.
-      await invoke("cache_remove_message", {
+      await invoke('cache_remove_message', {
         account_id: accountId,
-        folder: "INBOX",
+        folder: 'INBOX',
         uid: move.uid,
       });
     } catch {
@@ -58,5 +62,7 @@ export async function runIcloudRules(accountId: string): Promise<void> {
       // the inbox rather than failing the whole run.
     }
   }
-  if (top > cursor) cachePut(cursorKey(accountId), top);
+  if (top > cursor) {
+    cachePut(cursorKey(accountId), top);
+  }
 }

@@ -5,6 +5,9 @@
 **Date:** 2026-09-13
 **Status:** implementation complete; Flatpak runtime verification remains
 
+> Historical review: the 2026-11-19 audit added a random bridge token and
+> replaced the CSP hash below. See [the current audit](codebase-audit.md).
+
 ## Outcome
 
 The diagnostic link bridge is now internally complete and buildable. It:

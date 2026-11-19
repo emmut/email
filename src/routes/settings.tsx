@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useState } from 'react';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeft,
   Keyboard,
@@ -9,14 +9,14 @@ import {
   Users,
   UserPlus,
   type LucideIcon,
-} from "lucide-react";
+} from 'lucide-react';
 
-import { AccountsSection } from "@/components/settings/accounts-section";
-import { GeneralSection } from "@/components/settings/general-section";
-import { RulesSection } from "@/components/settings/rules-section";
-import { ShortcutsSection } from "@/components/settings/shortcuts-section";
-import { SignatureSection } from "@/components/settings/signature-section";
-import { Button } from "@/components/ui/button";
+import { AccountsSection } from '@/components/settings/accounts-section';
+import { GeneralSection } from '@/components/settings/general-section';
+import { RulesSection } from '@/components/settings/rules-section';
+import { ShortcutsSection } from '@/components/settings/shortcuts-section';
+import { SignatureSection } from '@/components/settings/signature-section';
+import { Button } from '@/components/ui/button';
 import {
   Empty,
   EmptyContent,
@@ -24,71 +24,56 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@/components/ui/empty";
-import { ScrollArea } from "@/components/ui/scroll-area";
+} from '@/components/ui/empty';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { useAccount } from "@/context/AccountContext";
-import { cn, isMac } from "@/lib/utils";
+} from '@/components/ui/select';
+import { useAccount } from '@/context/account-context';
+import { cn, isMac } from '@/lib/utils';
 
-const SECTIONS = [
-  "general",
-  "accounts",
-  "rules",
-  "signature",
-  "shortcuts",
-] as const;
+const SECTIONS = ['general', 'accounts', 'rules', 'signature', 'shortcuts'] as const;
 type Section = (typeof SECTIONS)[number];
 
-export const Route = createFileRoute("/settings")({
+export const Route = createFileRoute('/settings')({
   validateSearch: (search): { section?: Section } => {
     const section = search.section;
-    return SECTIONS.includes(section as Section)
-      ? { section: section as Section }
-      : {};
+    return SECTIONS.includes(section as Section) ? { section: section as Section } : {};
   },
   component: SettingsPage,
 });
 
 const NAV: { id: Section; label: string; icon: LucideIcon }[] = [
-  { id: "general", label: "General", icon: Settings2 },
-  { id: "accounts", label: "Accounts", icon: Users },
-  { id: "rules", label: "Mail rules", icon: SlidersHorizontal },
-  { id: "signature", label: "Signature", icon: SquarePen },
-  { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
+  { id: 'general', label: 'General', icon: Settings2 },
+  { id: 'accounts', label: 'Accounts', icon: Users },
+  { id: 'rules', label: 'Mail rules', icon: SlidersHorizontal },
+  { id: 'signature', label: 'Signature', icon: SquarePen },
+  { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
 ];
 
 function SettingsPage() {
   const navigate = useNavigate();
   const { section: initial } = Route.useSearch();
-  const [section, setSection] = useState<Section>(initial ?? "general");
+  const [section, setSection] = useState<Section>(initial ?? 'general');
   const { accounts, activeAccount, switchAccount } = useAccount();
 
   // Rules and signature are stored per account; the picker switches the
   // active account (the mail APIs — Gmail filters, tags, iCloud folders —
   // are bound to it, so a purely local selection would edit against the
   // wrong account).
-  const accountScoped = section === "rules" || section === "signature";
+  const accountScoped = section === 'rules' || section === 'signature';
 
   return (
     <div className="flex h-screen flex-col">
       <header
         data-tauri-drag-region
-        className={cn(
-          "flex items-center gap-2 border-b px-4 py-2",
-          isMac && "pt-8",
-        )}
+        className={cn('flex items-center gap-2 border-b px-4 py-2', isMac && 'pt-8')}
       >
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate({ to: "/" })}
-        >
+        <Button variant="ghost" size="sm" onClick={() => navigate({ to: '/' })}>
           <ArrowLeft data-icon="inline-start" />
           Mail
         </Button>
@@ -99,7 +84,7 @@ function SettingsPage() {
           {NAV.map(({ id, label, icon: Icon }) => (
             <Button
               key={id}
-              variant={section === id ? "secondary" : "ghost"}
+              variant={section === id ? 'secondary' : 'ghost'}
               size="sm"
               className="justify-start"
               onClick={() => setSection(id)}
@@ -113,16 +98,14 @@ function SettingsPage() {
           <main className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-4">
-                <h2 className="font-medium">
-                  {NAV.find((n) => n.id === section)?.label}
-                </h2>
+                <h2 className="font-medium">{NAV.find((n) => n.id === section)?.label}</h2>
                 {accountScoped && activeAccount && (
                   <Select
                     value={activeAccount.id}
                     onValueChange={(id) => id !== null && switchAccount(id)}
                     items={accounts.map((a) => ({
                       value: a.id,
-                      label: `${a.kind === "google" ? "Gmail" : "iCloud"} — ${a.email}`,
+                      label: `${a.kind === 'google' ? 'Gmail' : 'iCloud'} — ${a.email}`,
                     }))}
                   >
                     <SelectTrigger className="max-w-72" aria-label="Account">
@@ -131,7 +114,7 @@ function SettingsPage() {
                     <SelectContent>
                       {accounts.map((a) => (
                         <SelectItem key={a.id} value={a.id}>
-                          {a.kind === "google" ? "Gmail" : "iCloud"} — {a.email}
+                          {a.kind === 'google' ? 'Gmail' : 'iCloud'} — {a.email}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -140,34 +123,31 @@ function SettingsPage() {
               </div>
               {accountScoped && activeAccount && (
                 <p className="text-muted-foreground text-xs">
-                  {section === "rules"
+                  {section === 'rules'
                     ? "Each account keeps its own rules. Gmail rules run as filters on Google's servers; iCloud rules are applied by this app when new mail syncs."
-                    : "Each account keeps its own signature, stored on this computer."}{" "}
-                  Choosing an account here also makes it the active account in
-                  the mail view.
+                    : 'Each account keeps its own signature, stored on this computer.'}{' '}
+                  Choosing an account here also makes it the active account in the mail view.
                 </p>
               )}
-              {(section === "general" || section === "shortcuts") && (
-                <p className="text-muted-foreground text-xs">
-                  Applies to every account.
-                </p>
+              {(section === 'general' || section === 'shortcuts') && (
+                <p className="text-muted-foreground text-xs">Applies to every account.</p>
               )}
             </div>
-            {section === "general" && <GeneralSection />}
-            {section === "accounts" && <AccountsSection />}
-            {section === "rules" &&
+            {section === 'general' && <GeneralSection />}
+            {section === 'accounts' && <AccountsSection />}
+            {section === 'rules' &&
               (activeAccount ? (
                 <RulesSection />
               ) : (
-                <NoAccount onConnect={() => setSection("accounts")} />
+                <NoAccount onConnect={() => setSection('accounts')} />
               ))}
-            {section === "signature" &&
+            {section === 'signature' &&
               (activeAccount ? (
                 <SignatureSection />
               ) : (
-                <NoAccount onConnect={() => setSection("accounts")} />
+                <NoAccount onConnect={() => setSection('accounts')} />
               ))}
-            {section === "shortcuts" && <ShortcutsSection />}
+            {section === 'shortcuts' && <ShortcutsSection />}
           </main>
         </ScrollArea>
       </div>
@@ -184,8 +164,7 @@ function NoAccount({ onConnect }: { onConnect: () => void }) {
         </EmptyMedia>
         <EmptyTitle>Connect an account first</EmptyTitle>
         <EmptyDescription>
-          Account-specific settings become available after you add Gmail or
-          iCloud Mail.
+          Account-specific settings become available after you add Gmail or iCloud Mail.
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>

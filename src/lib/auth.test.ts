@@ -1,17 +1,17 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-import { getAccessToken, resetGoogleAccountId } from "@/lib/auth";
-import { invoke } from "@tauri-apps/api/core";
+import { getAccessToken, resetGoogleAccountId } from '@/lib/auth';
+import { invoke } from '@tauri-apps/api/core';
 
-vi.mock("@tauri-apps/api/core", () => ({
+vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
   isTauri: () => false,
 }));
 
 const mockInvoke = vi.mocked(invoke);
 
-function account(id: string, kind = "google") {
-  return { id, kind, email: "me@gmail.com" };
+function account(id: string, kind = 'google') {
+  return { id, kind, email: 'me@gmail.com' };
 }
 
 beforeEach(() => {
@@ -20,33 +20,33 @@ beforeEach(() => {
   resetGoogleAccountId();
 });
 
-describe("getAccessToken", () => {
-  it("uses the per-account token for the Google account row", async () => {
+describe('getAccessToken', () => {
+  it('uses the per-account token for the Google account row', async () => {
     mockInvoke.mockImplementation(async (cmd) => {
-      if (cmd === "list_accounts") return [account("A")];
-      if (cmd === "get_google_access_token") return "token-A";
+      if (cmd === 'list_accounts') return [account('A')];
+      if (cmd === 'get_google_access_token') return 'token-A';
       throw new Error(`unexpected ${cmd}`);
     });
-    await expect(getAccessToken()).resolves.toBe("token-A");
-    expect(mockInvoke).toHaveBeenCalledWith("get_google_access_token", {
-      account_id: "A",
+    await expect(getAccessToken()).resolves.toBe('token-A');
+    expect(mockInvoke).toHaveBeenCalledWith('get_google_access_token', {
+      account_id: 'A',
     });
   });
 
-  it("falls back to the legacy token store without a Google account", async () => {
+  it('falls back to the legacy token store without a Google account', async () => {
     mockInvoke.mockImplementation(async (cmd) => {
-      if (cmd === "list_accounts") return [account("I", "icloud")];
-      if (cmd === "get_access_token") return "legacy-token";
+      if (cmd === 'list_accounts') return [account('I', 'icloud')];
+      if (cmd === 'get_access_token') return 'legacy-token';
       throw new Error(`unexpected ${cmd}`);
     });
-    await expect(getAccessToken()).resolves.toBe("legacy-token");
+    await expect(getAccessToken()).resolves.toBe('legacy-token');
   });
 
-  it("re-resolves a stale cached account id after sign-out/sign-in", async () => {
+  it('re-resolves a stale cached account id after sign-out/sign-in', async () => {
     // First run caches account A.
     mockInvoke.mockImplementation(async (cmd) => {
-      if (cmd === "list_accounts") return [account("A")];
-      if (cmd === "get_google_access_token") return "token-A";
+      if (cmd === 'list_accounts') return [account('A')];
+      if (cmd === 'get_google_access_token') return 'token-A';
       throw new Error(`unexpected ${cmd}`);
     });
     await getAccessToken();
@@ -54,74 +54,72 @@ describe("getAccessToken", () => {
     // Sign-out + sign-in replaced the row: A's keychain entry is gone, the
     // new row is B. The cached id must not wedge every Gmail call.
     mockInvoke.mockImplementation(async (cmd, args) => {
-      if (cmd === "list_accounts") return [account("B")];
-      if (cmd === "get_google_access_token") {
+      if (cmd === 'list_accounts') return [account('B')];
+      if (cmd === 'get_google_access_token') {
         const { account_id } = args as { account_id: string };
-        if (account_id === "A") throw new Error("no refresh token in keychain");
-        return "token-B";
+        if (account_id === 'A') throw new Error('no refresh token in keychain');
+        return 'token-B';
       }
       throw new Error(`unexpected ${cmd}`);
     });
-    await expect(getAccessToken()).resolves.toBe("token-B");
+    await expect(getAccessToken()).resolves.toBe('token-B');
   });
 
-  it("rethrows when retrying finds the same account", async () => {
+  it('rethrows when retrying finds the same account', async () => {
     mockInvoke.mockImplementation(async (cmd) => {
-      if (cmd === "list_accounts") return [account("A")];
-      if (cmd === "get_google_access_token")
-        throw new Error("token endpoint returned 400: invalid_grant");
+      if (cmd === 'list_accounts') return [account('A')];
+      if (cmd === 'get_google_access_token')
+        throw new Error('token endpoint returned 400: invalid_grant');
       throw new Error(`unexpected ${cmd}`);
     });
-    await expect(getAccessToken()).rejects.toThrow("Gmail access expired");
+    await expect(getAccessToken()).rejects.toThrow('Gmail access expired');
   });
 
-  it("turns a revoked refresh token into an actionable re-grant error", async () => {
+  it('turns a revoked refresh token into an actionable re-grant error', async () => {
     mockInvoke.mockImplementation(async (cmd) => {
-      if (cmd === "list_accounts") return [account("A")];
-      if (cmd === "get_google_access_token")
-        throw "token endpoint returned 400 Bad Request: invalid_grant";
+      if (cmd === 'list_accounts') return [account('A')];
+      if (cmd === 'get_google_access_token')
+        throw 'token endpoint returned 400 Bad Request: invalid_grant';
       throw `unexpected ${cmd}`;
     });
     await expect(getAccessToken()).rejects.toMatchObject({
-      message: expect.stringContaining("Re-grant access"),
+      message: expect.stringContaining('Re-grant access'),
     });
   });
 
-  it("wraps plain-string command errors so the message is never blank", async () => {
+  it('wraps plain-string command errors so the message is never blank', async () => {
     mockInvoke.mockImplementation(async (cmd) => {
-      if (cmd === "list_accounts") return [account("A")];
-      if (cmd === "get_google_access_token") throw "token request failed";
+      if (cmd === 'list_accounts') return [account('A')];
+      if (cmd === 'get_google_access_token') throw 'token request failed';
       throw `unexpected ${cmd}`;
     });
     const err = await getAccessToken().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toBe("token request failed");
+    expect((err as Error).message).toBe('token request failed');
   });
 });
 
-describe("explicit account tokens", () => {
-  it("uses the requested account even when another account is active", async () => {
-    localStorage.setItem("activeAccountId", "B");
-    mockInvoke.mockResolvedValue("token-A");
-    await expect(getAccessToken("A")).resolves.toBe("token-A");
-    expect(mockInvoke).toHaveBeenCalledExactlyOnceWith(
-      "get_google_access_token",
-      { account_id: "A" },
-    );
+describe('explicit account tokens', () => {
+  it('uses the requested account even when another account is active', async () => {
+    localStorage.setItem('activeAccountId', 'B');
+    mockInvoke.mockResolvedValue('token-A');
+    await expect(getAccessToken('A')).resolves.toBe('token-A');
+    expect(mockInvoke).toHaveBeenCalledExactlyOnceWith('get_google_access_token', {
+      account_id: 'A',
+    });
   });
 
-  it("never falls back to another account after an active token fails", async () => {
-    localStorage.setItem("activeAccountId", "A");
-    mockInvoke.mockRejectedValue("invalid_grant");
-    await expect(getAccessToken()).rejects.toThrow("Gmail access expired");
-    expect(mockInvoke).toHaveBeenCalledExactlyOnceWith(
-      "get_google_access_token",
-      { account_id: "A" },
-    );
+  it('never falls back to another account after an active token fails', async () => {
+    localStorage.setItem('activeAccountId', 'A');
+    mockInvoke.mockRejectedValue('invalid_grant');
+    await expect(getAccessToken()).rejects.toThrow('Gmail access expired');
+    expect(mockInvoke).toHaveBeenCalledExactlyOnceWith('get_google_access_token', {
+      account_id: 'A',
+    });
   });
 });
 
-it("coalesces concurrent token refreshes per account without caching expired tokens", async () => {
+it('coalesces concurrent token refreshes per account without caching expired tokens', async () => {
   let finish!: (value: string) => void;
   mockInvoke.mockImplementation(
     () =>
@@ -129,13 +127,13 @@ it("coalesces concurrent token refreshes per account without caching expired tok
         finish = resolve;
       }),
   );
-  const first = getAccessToken("A");
-  const second = getAccessToken("A");
+  const first = getAccessToken('A');
+  const second = getAccessToken('A');
   expect(mockInvoke).toHaveBeenCalledTimes(1);
-  finish("token-A");
-  await expect(first).resolves.toBe("token-A");
-  await expect(second).resolves.toBe("token-A");
-  mockInvoke.mockResolvedValue("fresh-token-A");
-  await expect(getAccessToken("A")).resolves.toBe("fresh-token-A");
+  finish('token-A');
+  await expect(first).resolves.toBe('token-A');
+  await expect(second).resolves.toBe('token-A');
+  mockInvoke.mockResolvedValue('fresh-token-A');
+  await expect(getAccessToken('A')).resolves.toBe('fresh-token-A');
   expect(mockInvoke).toHaveBeenCalledTimes(2);
 });

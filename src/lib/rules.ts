@@ -1,6 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
-import { queryOptions } from "@tanstack/react-query";
-import { cacheGet } from "@/lib/cache";
+import { invoke } from '@tauri-apps/api/core';
+import { queryOptions } from '@tanstack/react-query';
+import { cacheGet } from '@/lib/cache';
 
 // User-defined mail rules. A rule is a set of AND-ed "field contains value"
 // conditions plus one action. Gmail rules are materialized as server-side
@@ -9,7 +9,7 @@ import { cacheGet } from "@/lib/cache";
 // after each inbox sync (see rules-engine.ts) — the resulting move persists
 // on the server.
 
-export type RuleField = "from" | "to" | "subject";
+export type RuleField = 'from' | 'to' | 'subject';
 
 export interface RuleCondition {
   field: RuleField;
@@ -17,8 +17,7 @@ export interface RuleCondition {
 }
 
 export type RuleAction =
-  | { kind: "gmail-label"; labelId: string }
-  | { kind: "icloud-move"; folder: string };
+  { kind: 'gmail-label'; labelId: string } | { kind: 'icloud-move'; folder: string };
 
 export interface MailRule {
   id: string;
@@ -39,12 +38,11 @@ export interface RuleMessage {
 
 // --- predicates ---
 
-export function conditionMatches(
-  cond: RuleCondition,
-  msg: RuleMessage,
-): boolean {
+export function conditionMatches(cond: RuleCondition, msg: RuleMessage): boolean {
   const value = cond.value.trim().toLowerCase();
-  if (!value) return false;
+  if (!value) {
+    return false;
+  }
   return msg[cond.field].toLowerCase().includes(value);
 }
 
@@ -57,10 +55,7 @@ export function ruleMatches(rule: MailRule, msg: RuleMessage): boolean {
 }
 
 // Rules are ordered; the first match decides the action.
-export function firstMatchingRule(
-  rules: MailRule[],
-  msg: RuleMessage,
-): MailRule | null {
+export function firstMatchingRule(rules: MailRule[], msg: RuleMessage): MailRule | null {
   return rules.find((r) => ruleMatches(r, msg)) ?? null;
 }
 
@@ -75,9 +70,7 @@ export interface GmailFilterCriteria {
 // A Gmail filter holds at most one value per criteria field, so a rule maps
 // onto a server-side filter only when every field appears once and every
 // condition has a value.
-export function canMaterializeGmailFilter(
-  conditions: RuleCondition[],
-): boolean {
+export function canMaterializeGmailFilter(conditions: RuleCondition[]): boolean {
   const fields = conditions.map((c) => c.field);
   return (
     conditions.length > 0 &&
@@ -86,9 +79,7 @@ export function canMaterializeGmailFilter(
   );
 }
 
-export function gmailFilterCriteria(
-  conditions: RuleCondition[],
-): GmailFilterCriteria {
+export function gmailFilterCriteria(conditions: RuleCondition[]): GmailFilterCriteria {
   const criteria: GmailFilterCriteria = {};
   for (const c of conditions) criteria[c.field] = c.value.trim();
   return criteria;
@@ -107,7 +98,7 @@ export interface IcloudRuleInput {
 
 export function icloudRuleMessage(msg: IcloudRuleInput): RuleMessage {
   return {
-    from: [msg.from_name, msg.from_email].filter(Boolean).join(" "),
+    from: [msg.from_name, msg.from_email].filter(Boolean).join(' '),
     to: msg.to,
     subject: msg.subject,
   };
@@ -119,10 +110,7 @@ export function maxUid(messages: { uid: number }[]): number {
 
 // Messages that arrived after the previous engine run (cursor = highest UID
 // already considered).
-export function selectNewMessages<T extends { uid: number }>(
-  messages: T[],
-  cursor: number,
-): T[] {
+export function selectNewMessages<T extends { uid: number }>(messages: T[], cursor: number): T[] {
   return messages.filter((m) => m.uid > cursor);
 }
 
@@ -131,14 +119,11 @@ export interface IcloudMove {
   targetFolder: string;
 }
 
-export function planIcloudMoves(
-  messages: IcloudRuleInput[],
-  rules: MailRule[],
-): IcloudMove[] {
+export function planIcloudMoves(messages: IcloudRuleInput[], rules: MailRule[]): IcloudMove[] {
   const moves: IcloudMove[] = [];
   for (const msg of messages) {
     const rule = firstMatchingRule(rules, icloudRuleMessage(msg));
-    if (rule?.action.kind === "icloud-move") {
+    if (rule?.action.kind === 'icloud-move') {
       moves.push({ uid: msg.uid, targetFolder: rule.action.folder });
     }
   }
@@ -147,7 +132,9 @@ export function planIcloudMoves(
 
 // --- persistence (SQLite cache_kv, keyed per account) ---
 
-const rulesKey = (accountId: string) => `rules:v1:${accountId}`;
+function rulesKey(accountId: string) {
+  return `rules:v1:${accountId}`;
+}
 
 export async function loadRules(accountId: string): Promise<MailRule[]> {
   return (await cacheGet<MailRule[]>(rulesKey(accountId))) ?? [];
@@ -156,7 +143,7 @@ export async function loadRules(accountId: string): Promise<MailRule[]> {
 // Unlike cachePut this surfaces failures — losing a rule edit silently would
 // be worse than an error toast.
 export function saveRules(accountId: string, rules: MailRule[]): Promise<void> {
-  return invoke("cache_put_json", {
+  return invoke('cache_put_json', {
     key: rulesKey(accountId),
     json: JSON.stringify(rules),
   });
@@ -164,7 +151,7 @@ export function saveRules(accountId: string, rules: MailRule[]): Promise<void> {
 
 export function rulesQuery(accountId: string) {
   return queryOptions({
-    queryKey: ["rules", accountId],
+    queryKey: ['rules', accountId],
     queryFn: () => loadRules(accountId),
     enabled: !!accountId,
     staleTime: Infinity,

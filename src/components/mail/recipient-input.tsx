@@ -1,16 +1,16 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from 'react';
 
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
-import type { Contact } from "@/lib/gmail";
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
+import type { Contact } from '@/lib/gmail';
 
 // "Name <a@b>" list entry; quote the name if it would break the comma syntax.
 export function formatRecipient(c: Contact): string {
-  if (!c.name || c.name === c.email) return c.email;
-  const name = /[,<>"]/.test(c.name)
-    ? `"${c.name.replace(/"/g, '\\"')}"`
-    : c.name;
+  if (!c.name || c.name === c.email) {
+    return c.email;
+  }
+  const name = /[,<>"]/.test(c.name) ? `"${c.name.replace(/"/g, '\\"')}"` : c.name;
   return `${name} <${c.email}>`;
 }
 
@@ -35,32 +35,36 @@ export function RecipientInput({
   const [highlighted, setHighlighted] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const lastComma = value.lastIndexOf(",");
-  const token = value.slice(lastComma + 1).trim().toLowerCase();
+  const lastComma = value.lastIndexOf(',');
+  const token = value
+    .slice(lastComma + 1)
+    .trim()
+    .toLowerCase();
 
   const suggestions = useMemo(() => {
-    if (!token) return [];
+    if (!token) {
+      return [];
+    }
     const already = new Set(
       value
         .toLowerCase()
-        .split(",")
+        .split(',')
         .map((s) => s.trim()),
     );
     return contacts
       .filter(
         (c) =>
-          (c.email.toLowerCase().includes(token) ||
-            c.name.toLowerCase().includes(token)) &&
+          (c.email.toLowerCase().includes(token) || c.name.toLowerCase().includes(token)) &&
           !already.has(c.email.toLowerCase()),
       )
       .slice(0, 8);
   }, [contacts, token, value]);
 
-  const pick = (contact: Contact) => {
-    const kept = lastComma === -1 ? "" : `${value.slice(0, lastComma + 1)} `;
+  function pick(contact: Contact) {
+    const kept = lastComma === -1 ? '' : `${value.slice(0, lastComma + 1)} `;
     onChange(`${kept}${formatRecipient(contact)}, `);
     setOpen(false);
-  };
+  }
 
   const showList = open && suggestions.length > 0;
 
@@ -83,22 +87,24 @@ export function RecipientInput({
         }}
         onBlur={(e) => {
           // Keep open when the click lands on a suggestion (handled onMouseDown)
-          if (!containerRef.current?.contains(e.relatedTarget)) setOpen(false);
+          if (!containerRef.current?.contains(e.relatedTarget)) {
+            setOpen(false);
+          }
         }}
         onKeyDown={(e) => {
-          if (!showList) return;
-          if (e.key === "ArrowDown") {
+          if (!showList) {
+            return;
+          }
+          if (e.key === 'ArrowDown') {
             e.preventDefault();
             setHighlighted((i) => (i + 1) % suggestions.length);
-          } else if (e.key === "ArrowUp") {
+          } else if (e.key === 'ArrowUp') {
             e.preventDefault();
-            setHighlighted(
-              (i) => (i - 1 + suggestions.length) % suggestions.length,
-            );
-          } else if (e.key === "Enter" || e.key === "Tab") {
+            setHighlighted((i) => (i - 1 + suggestions.length) % suggestions.length);
+          } else if (e.key === 'Enter' || e.key === 'Tab') {
             e.preventDefault();
             pick(suggestions[highlighted]);
-          } else if (e.key === "Escape") {
+          } else if (e.key === 'Escape') {
             setOpen(false);
           }
         }}
@@ -110,8 +116,8 @@ export function RecipientInput({
               key={c.email}
               type="button"
               className={cn(
-                "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm",
-                i === highlighted && "bg-accent text-accent-foreground",
+                'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm',
+                i === highlighted && 'bg-accent text-accent-foreground',
               )}
               onMouseDown={(e) => {
                 e.preventDefault();
@@ -123,9 +129,7 @@ export function RecipientInput({
                 {c.name ? (
                   <>
                     <span className="truncate">{c.name}</span>
-                    <span className="text-muted-foreground truncate text-xs">
-                      {c.email}
-                    </span>
+                    <span className="text-muted-foreground truncate text-xs">{c.email}</span>
                   </>
                 ) : (
                   <span className="truncate">{c.email}</span>
@@ -137,11 +141,11 @@ export function RecipientInput({
               >
                 <span
                   className={cn(
-                    "size-1.5 rounded-full",
-                    c.source === "google" ? "bg-red-500" : "bg-sky-500",
+                    'size-1.5 rounded-full',
+                    c.source === 'google' ? 'bg-red-500' : 'bg-sky-500',
                   )}
                 />
-                {c.source === "google" ? "Gmail" : "iCloud"}
+                {c.source === 'google' ? 'Gmail' : 'iCloud'}
               </Badge>
             </button>
           ))}

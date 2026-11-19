@@ -19,10 +19,10 @@ export interface MailFolder {
 }
 
 export const folders: MailFolder[] = [
-  { id: "inbox", label: "Inbox", icon: "inbox" },
-  { id: "drafts", label: "Drafts", icon: "file" },
-  { id: "sent", label: "Sent", icon: "send" },
-  { id: "junk", label: "Junk", icon: "archive-x" },
-  { id: "trash", label: "Trash", icon: "trash2" },
-  { id: "archive", label: "Archive", icon: "archive" },
+  { id: 'inbox', label: 'Inbox', icon: 'inbox' },
+  { id: 'drafts', label: 'Drafts', icon: 'file' },
+  { id: 'sent', label: 'Sent', icon: 'send' },
+  { id: 'junk', label: 'Junk', icon: 'archive-x' },
+  { id: 'trash', label: 'Trash', icon: 'trash2' },
+  { id: 'archive', label: 'Archive', icon: 'archive' },
 ];

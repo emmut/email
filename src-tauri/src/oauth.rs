@@ -76,7 +76,9 @@ fn keychain_entry() -> Result<keyring::Entry, String> {
 }
 
 pub fn store_refresh_token(token: &str) -> Result<(), String> {
-    keychain_entry()?.set_password(token).map_err(|e| e.to_string())
+    keychain_entry()?
+        .set_password(token)
+        .map_err(|e| e.to_string())
 }
 
 pub fn load_refresh_token() -> Result<Option<String>, String> {
@@ -94,18 +96,6 @@ pub fn delete_refresh_token() -> Result<(), String> {
     }
 }
 
-/// Recreates the keychain item so the current binary becomes its ACL owner.
-/// macOS ties keychain access to the exact code signature; with ad-hoc signed
-/// builds every rebuild looks like a new app to the item created by the old
-/// one, so without this each launch after an update would prompt again.
-pub fn reown_refresh_token(token: &str) {
-    if delete_refresh_token().is_ok() {
-        if let Err(e) = store_refresh_token(token) {
-            eprintln!("failed to rewrite refresh token to keychain: {e}");
-        }
-    }
-}
-
 /// Returns the refresh token, reading the keychain only on the first call per
 /// app run. Callers must hold the state lock, which also means at most one
 /// keychain prompt regardless of how many requests race at startup.
@@ -116,12 +106,6 @@ async fn refresh_token(inner: &mut Inner) -> Result<Option<String>, String> {
         let token = tauri::async_runtime::spawn_blocking(load_refresh_token)
             .await
             .map_err(|e| e.to_string())??;
-        if let Some(token) = token.clone() {
-            // Awaited under the lock so a concurrent rotation can't interleave
-            // with the delete + recreate. No prompt: deleting never reveals the
-            // secret and the new item is created owned by us.
-            let _ = tauri::async_runtime::spawn_blocking(move || reown_refresh_token(&token)).await;
-        }
         inner.refresh = token;
         inner.keychain_loaded = true;
     }
@@ -146,7 +130,10 @@ pub fn cache_token(inner: &mut Inner, tokens: &TokenResponse) {
 }
 
 pub async fn exchange(params: &[(&str, &str)]) -> Result<TokenResponse, String> {
-    let resp = reqwest::Client::new()
+    let resp = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?
         .post(TOKEN_ENDPOINT)
         .form(params)
         .send()
@@ -175,7 +162,10 @@ fn respond_html(request: tiny_http::Request, message: &str) {
 
 /// Blocks until Google redirects the browser back to the loopback listener,
 /// then returns the authorization code.
-fn wait_for_redirect(server: tiny_http::Server, expected_state: &str) -> Result<String, String> {
+pub(crate) fn wait_for_redirect(
+    server: tiny_http::Server,
+    expected_state: &str,
+) -> Result<String, String> {
     let deadline = Instant::now() + REDIRECT_TIMEOUT;
     loop {
         let remaining = deadline
@@ -205,15 +195,18 @@ fn wait_for_redirect(server: tiny_http::Server, expected_state: &str) -> Result<
             let _ = request.respond(tiny_http::Response::empty(404));
             continue;
         }
+        if state.as_deref() != Some(expected_state) {
+            respond_html(request, "Sign-in failed. You can close this tab.");
+            continue;
+        }
         if let Some(error) = error {
             respond_html(request, "Sign-in failed. You can close this tab.");
             return Err(format!("authorization failed: {error}"));
         }
-        if state.as_deref() != Some(expected_state) {
-            respond_html(request, "Sign-in failed. You can close this tab.");
-            return Err("state mismatch in OAuth redirect".to_string());
-        }
-        respond_html(request, "Signed in. You can close this tab and return to the app.");
+        respond_html(
+            request,
+            "Signed in. You can close this tab and return to the app.",
+        );
         return Ok(code.unwrap());
     }
 }
@@ -337,7 +330,10 @@ pub async fn sign_out(state: State<'_, AuthState>) -> Result<(), String> {
     let mut inner = state.0.lock().await;
     if let Some(refresh) = refresh_token(&mut inner).await? {
         // Best-effort revocation; sign-out must still succeed offline.
-        let _ = reqwest::Client::new()
+        let _ = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| e.to_string())?
             .post(REVOKE_ENDPOINT)
             .form(&[("token", refresh.as_str())])
             .send()

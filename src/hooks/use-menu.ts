@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useEffect, useRef } from 'react';
+import { listen } from '@tauri-apps/api/event';
 
 // Native menu items the Rust side doesn't handle itself arrive as a single
 // "menu" event whose payload is the menu item id (see on_menu_event in
@@ -9,7 +9,7 @@ export function useMenuEvents(handlers: Record<string, () => void>) {
   handlersRef.current = handlers;
 
   useEffect(() => {
-    const unlisten = listen<string>("menu", (event) => {
+    const unlisten = listen<string>('menu', (event) => {
       handlersRef.current[event.payload]?.();
     });
     return () => {

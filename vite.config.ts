@@ -1,39 +1,39 @@
 /// <reference types="vitest/config" />
-import { defineConfig } from "vite";
-import path from "node:path";
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
-import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import { defineConfig } from 'vite';
+import path from 'node:path';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { tanstackRouter } from '@tanstack/router-plugin/vite';
 
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(async () => ({
+export default defineConfig({
   plugins: [
     // Router plugin must run before the React plugin.
-    tanstackRouter({ target: "react", autoCodeSplitting: true }),
+    tanstackRouter({ target: 'react', autoCodeSplitting: true }),
     react(),
     tailwindcss(),
   ],
 
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
 
   test: {
-    environment: "jsdom",
-    setupFiles: ["./src/test/setup.ts"],
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
     coverage: {
-      provider: "v8" as const,
-      include: ["src/**/*.{ts,tsx}"],
+      provider: 'v8' as const,
+      include: ['src/**/*.{ts,tsx}'],
       exclude: [
-        "src/routeTree.gen.ts",
-        "src/main.tsx",
-        "src/vite-env.d.ts",
-        "src/test/**",
-        "src/components/ui/**", // shadcn registry code
+        'src/routeTree.gen.ts',
+        'src/main.tsx',
+        'src/vite-env.d.ts',
+        'src/test/**',
+        'src/components/ui/**', // shadcn registry code
       ],
     },
   },
@@ -49,14 +49,14 @@ export default defineConfig(async () => ({
     host: host || false,
     hmr: host
       ? {
-          protocol: "ws",
+          protocol: 'ws',
           host,
           port: 1421,
         }
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      ignored: ['**/src-tauri/**'],
     },
   },
-}));
+});

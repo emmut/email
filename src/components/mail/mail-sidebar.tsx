@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import {
   Archive,
   ArchiveX,
@@ -14,10 +14,10 @@ import {
   Tag as TagIcon,
   Trash2,
   type LucideIcon,
-} from "lucide-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+} from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,30 +27,30 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+} from '@/components/ui/context-menu';
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 import {
   Sidebar,
   SidebarContent,
@@ -62,10 +62,10 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@/components/ui/sidebar";
-import { folders } from "@/components/mail/data";
-import { useAccount } from "@/context/AccountContext";
-import { cn, initialsFromEmail, isMac } from "@/lib/utils";
+} from '@/components/ui/sidebar';
+import { folders } from '@/components/mail/data';
+import { useAccount } from '@/context/account-context';
+import { cn, initialsFromEmail, isMac } from '@/lib/utils';
 import {
   avatarQuery,
   clearGmailCache,
@@ -76,7 +76,7 @@ import {
   tagFolderId,
   tagsQuery,
   type Tag,
-} from "@/lib/gmail";
+} from '@/lib/gmail';
 import {
   icloudAvatarQuery,
   icloudCreateFolder,
@@ -84,16 +84,16 @@ import {
   icloudDeleteFolder,
   icloudFolderCountsQuery,
   icloudFoldersQuery,
-} from "@/lib/icloud";
-import { pendingOpsQuery, useOnline } from "@/lib/offline";
-import { invoke } from "@tauri-apps/api/core";
-import { CloudOff } from "lucide-react";
+} from '@/lib/icloud';
+import { pendingOpsQuery, useOnline } from '@/lib/offline';
+import { invoke } from '@tauri-apps/api/core';
+import { CloudOff } from 'lucide-react';
 
 const ICONS: Record<string, LucideIcon> = {
   inbox: Inbox,
   file: File,
   send: Send,
-  "archive-x": ArchiveX,
+  'archive-x': ArchiveX,
   trash2: Trash2,
   archive: Archive,
 };
@@ -106,15 +106,9 @@ export function MailSidebar({
   onSelectFolder: (id: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const {
-    accounts,
-    activeAccount,
-    activeAccountId,
-    switchAccount,
-    removeAccount,
-    isLoading,
-  } = useAccount();
-  const isIcloud = activeAccount?.kind === "icloud";
+  const { accounts, activeAccount, activeAccountId, switchAccount, removeAccount, isLoading } =
+    useAccount();
+  const isIcloud = activeAccount?.kind === 'icloud';
   const { data: profile } = useQuery({
     ...profileQuery(activeAccount?.id),
     enabled: !isIcloud,
@@ -124,7 +118,7 @@ export function MailSidebar({
     enabled: !isIcloud,
   });
   const { data: icloudCounts } = useQuery({
-    ...icloudFolderCountsQuery(activeAccount?.id ?? ""),
+    ...icloudFolderCountsQuery(activeAccount?.id ?? ''),
     enabled: isIcloud,
   });
   const counts = isIcloud ? icloudCounts : gmailCounts;
@@ -133,7 +127,7 @@ export function MailSidebar({
     enabled: !isIcloud,
   });
   const { data: icloudFolders } = useQuery({
-    ...icloudFoldersQuery(activeAccount?.id ?? ""),
+    ...icloudFoldersQuery(activeAccount?.id ?? ''),
     enabled: isIcloud,
   });
   const { data: gmailAvatar } = useQuery({
@@ -141,18 +135,16 @@ export function MailSidebar({
     enabled: !isIcloud,
   });
   const { data: icloudAvatar } = useQuery({
-    ...icloudAvatarQuery(activeAccount?.email ?? ""),
+    ...icloudAvatarQuery(activeAccount?.email ?? ''),
     enabled: isIcloud,
   });
   const avatar = isIcloud ? icloudAvatar : gmailAvatar;
   const [newTagOpen, setNewTagOpen] = useState(false);
-  const [newTagName, setNewTagName] = useState("");
+  const [newTagName, setNewTagName] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Tag | null>(null);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
-  const [newFolderName, setNewFolderName] = useState("");
-  const [deleteFolderTarget, setDeleteFolderTarget] = useState<string | null>(
-    null,
-  );
+  const [newFolderName, setNewFolderName] = useState('');
+  const [deleteFolderTarget, setDeleteFolderTarget] = useState<string | null>(null);
   const online = useOnline();
   const { data: pendingOps } = useQuery(pendingOpsQuery);
   const pendingCount = pendingOps?.length ?? 0;
@@ -162,10 +154,10 @@ export function MailSidebar({
     mutationFn: (name: string) => createTag(name, activeAccount?.id),
     onSuccess: (tag) => {
       queryClient.invalidateQueries({
-        queryKey: ["gmail", activeAccount?.id, "tags"],
+        queryKey: ['gmail', activeAccount?.id, 'tags'],
       });
       setNewTagOpen(false);
-      setNewTagName("");
+      setNewTagName('');
       onSelectFolder(tagFolderId(tag.id));
     },
   });
@@ -174,36 +166,38 @@ export function MailSidebar({
     mutationFn: (tag: Tag) => deleteTag(tag.id, activeAccount?.id),
     onSuccess: (_data, tag) => {
       queryClient.invalidateQueries({
-        queryKey: ["gmail", activeAccount?.id, "tags"],
+        queryKey: ['gmail', activeAccount?.id, 'tags'],
       });
       queryClient.invalidateQueries({
-        queryKey: ["gmail", activeAccount?.id, "list"],
+        queryKey: ['gmail', activeAccount?.id, 'list'],
       });
-      if (activeFolder === tagFolderId(tag.id)) onSelectFolder("inbox");
+      if (activeFolder === tagFolderId(tag.id)) {
+        onSelectFolder('inbox');
+      }
     },
   });
 
   const createFolderMutation = useMutation({
-    mutationFn: (name: string) =>
-      icloudCreateFolder(activeAccount?.id ?? "", name),
+    mutationFn: (name: string) => icloudCreateFolder(activeAccount?.id ?? '', name),
     onSuccess: (_data, name) => {
       queryClient.invalidateQueries({
-        queryKey: ["icloud", activeAccount?.id, "folders"],
+        queryKey: ['icloud', activeAccount?.id, 'folders'],
       });
       setNewFolderOpen(false);
-      setNewFolderName("");
+      setNewFolderName('');
       onSelectFolder(icloudCustomFolderId(name));
     },
   });
 
   const deleteFolderMutation = useMutation({
-    mutationFn: (name: string) =>
-      icloudDeleteFolder(activeAccount?.id ?? "", name),
+    mutationFn: (name: string) => icloudDeleteFolder(activeAccount?.id ?? '', name),
     onSuccess: (_data, name) => {
       queryClient.invalidateQueries({
-        queryKey: ["icloud", activeAccount?.id, "folders"],
+        queryKey: ['icloud', activeAccount?.id, 'folders'],
       });
-      if (activeFolder === icloudCustomFolderId(name)) onSelectFolder("inbox");
+      if (activeFolder === icloudCustomFolderId(name)) {
+        onSelectFolder('inbox');
+      }
     },
   });
 
@@ -211,26 +205,26 @@ export function MailSidebar({
     mutationFn: async () => {
       if (activeAccount) {
         const lastGoogle =
-          activeAccount.kind === "google" &&
-          accounts.filter((a) => a.kind === "google").length === 1;
+          activeAccount.kind === 'google' &&
+          accounts.filter((a) => a.kind === 'google').length === 1;
         await removeAccount(activeAccount.id);
         // The legacy keychain token belongs to the first Google account —
         // clear it (and the local Gmail cache) when the last one goes away.
         if (lastGoogle) {
-          await invoke("sign_out");
+          await invoke('sign_out');
           await clearGmailCache(activeAccount?.id);
         }
       } else {
         // Legacy Google sign-in with no account row.
-        await invoke("sign_out");
+        await invoke('sign_out');
         await clearGmailCache();
       }
     },
     onSuccess: () => {
-      queryClient.removeQueries({ queryKey: ["gmail", activeAccount?.id] });
-      queryClient.removeQueries({ queryKey: ["icloud", activeAccount?.id] });
-      queryClient.invalidateQueries({ queryKey: ["auth"] });
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.removeQueries({ queryKey: ['gmail', activeAccount?.id] });
+      queryClient.removeQueries({ queryKey: ['icloud', activeAccount?.id] });
+      queryClient.invalidateQueries({ queryKey: ['auth'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
     },
   });
 
@@ -239,7 +233,7 @@ export function MailSidebar({
   if (isLoading) {
     return (
       <Sidebar collapsible="icon">
-        <SidebarHeader data-tauri-drag-region className={cn(isMac && "pt-8")}>
+        <SidebarHeader data-tauri-drag-region className={cn(isMac && 'pt-8')}>
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg">
@@ -257,7 +251,7 @@ export function MailSidebar({
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader data-tauri-drag-region className={cn(isMac && "pt-8")}>
+      <SidebarHeader data-tauri-drag-region className={cn(isMac && 'pt-8')}>
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
@@ -267,16 +261,14 @@ export function MailSidebar({
                     <Avatar className="size-8 rounded-lg">
                       {avatar && <AvatarImage src={avatar} alt="" />}
                       <AvatarFallback className="bg-primary text-primary-foreground rounded-lg">
-                        {email ? initialsFromEmail(email) : "…"}
+                        {email ? initialsFromEmail(email) : '…'}
                       </AvatarFallback>
                     </Avatar>
                     <div className="grid flex-1 text-left text-sm leading-tight">
                       <span className="truncate font-medium">
-                        {email ? email.split("@")[0] : "Loading…"}
+                        {email ? email.split('@')[0] : 'Loading…'}
                       </span>
-                      <span className="text-muted-foreground truncate text-xs">
-                        {email ?? ""}
-                      </span>
+                      <span className="text-muted-foreground truncate text-xs">{email ?? ''}</span>
                     </div>
                     <ChevronsUpDown className="ml-auto size-4" />
                   </SidebarMenuButton>
@@ -285,22 +277,16 @@ export function MailSidebar({
               <DropdownMenuContent align="start" className="w-64">
                 {/* Account switcher */}
                 <div className="p-2 border-b">
-                  <div className="px-2 py-1 text-xs text-muted-foreground uppercase">
-                    Accounts
-                  </div>
+                  <div className="px-2 py-1 text-xs text-muted-foreground uppercase">Accounts</div>
                   {accounts.map((acc) => (
                     <DropdownMenuItem
                       key={acc.id}
                       onClick={() => switchAccount(acc.id)}
-                      className={
-                        acc.id === activeAccountId
-                          ? "bg-accent font-medium"
-                          : ""
-                      }
+                      className={acc.id === activeAccountId ? 'bg-accent font-medium' : ''}
                     >
                       <span className="flex items-center gap-2 w-full">
                         <span className="text-xs uppercase text-muted-foreground">
-                          {acc.kind === "google" ? "Google" : "iCloud"}
+                          {acc.kind === 'google' ? 'Google' : 'iCloud'}
                         </span>
                         <span className="truncate">{acc.email}</span>
                         {acc.is_default && (
@@ -316,12 +302,10 @@ export function MailSidebar({
                     </DropdownMenuItem>
                   ))}
                 </div>
-                <DropdownMenuItem onClick={() => navigate({ to: "/settings" })}>
+                <DropdownMenuItem onClick={() => navigate({ to: '/settings' })}>
                   <Settings className="size-4" />
                   Settings…
-                  <DropdownMenuShortcut>
-                    {isMac ? "⌘," : "Ctrl+,"}
-                  </DropdownMenuShortcut>
+                  <DropdownMenuShortcut>{isMac ? '⌘,' : 'Ctrl+,'}</DropdownMenuShortcut>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={signOutMutation.isPending}
@@ -360,10 +344,7 @@ export function MailSidebar({
         {!isIcloud && (
           <SidebarGroup>
             <SidebarGroupLabel>Tags</SidebarGroupLabel>
-            <SidebarGroupAction
-              title="New tag"
-              onClick={() => setNewTagOpen(true)}
-            >
+            <SidebarGroupAction title="New tag" onClick={() => setNewTagOpen(true)}>
               <Plus />
             </SidebarGroupAction>
             <SidebarMenu>
@@ -385,10 +366,7 @@ export function MailSidebar({
                         }
                       />
                       <ContextMenuContent>
-                        <ContextMenuItem
-                          variant="destructive"
-                          onClick={() => setDeleteTarget(tag)}
-                        >
+                        <ContextMenuItem variant="destructive" onClick={() => setDeleteTarget(tag)}>
                           <Trash2 />
                           Delete tag
                         </ContextMenuItem>
@@ -403,10 +381,7 @@ export function MailSidebar({
         {isIcloud && (
           <SidebarGroup>
             <SidebarGroupLabel>Folders</SidebarGroupLabel>
-            <SidebarGroupAction
-              title="New folder"
-              onClick={() => setNewFolderOpen(true)}
-            >
+            <SidebarGroupAction title="New folder" onClick={() => setNewFolderOpen(true)}>
               <Plus />
             </SidebarGroupAction>
             <SidebarMenu>
@@ -448,13 +423,13 @@ export function MailSidebar({
             <div className="text-muted-foreground flex items-center gap-2 px-2 py-1 text-xs">
               {!online && <CloudOff className="size-3.5 shrink-0" />}
               <span>
-                {!online && pendingCount === 0 && "Offline"}
+                {!online && pendingCount === 0 && 'Offline'}
                 {!online &&
                   pendingCount > 0 &&
-                  `Offline — ${pendingCount} pending ${pendingCount === 1 ? "change" : "changes"}`}
+                  `Offline — ${pendingCount} pending ${pendingCount === 1 ? 'change' : 'changes'}`}
                 {online &&
                   pendingCount > 0 &&
-                  `Syncing ${pendingCount} pending ${pendingCount === 1 ? "change" : "changes"}…`}
+                  `Syncing ${pendingCount} pending ${pendingCount === 1 ? 'change' : 'changes'}…`}
               </span>
             </div>
           </SidebarGroup>
@@ -466,9 +441,7 @@ export function MailSidebar({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              Delete tag “{deleteTarget?.name}”?
-            </AlertDialogTitle>
+            <AlertDialogTitle>Delete tag “{deleteTarget?.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
               The tag is removed from every mail. Mails themselves are kept.
             </AlertDialogDescription>
@@ -476,9 +449,7 @@ export function MailSidebar({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() =>
-                deleteTarget && deleteTagMutation.mutate(deleteTarget)
-              }
+              onClick={() => deleteTarget && deleteTagMutation.mutate(deleteTarget)}
             >
               Delete
             </AlertDialogAction>
@@ -492,7 +463,9 @@ export function MailSidebar({
             onSubmit={(e) => {
               e.preventDefault();
               const name = newTagName.trim();
-              if (name) createTagMutation.mutate(name);
+              if (name) {
+                createTagMutation.mutate(name);
+              }
             }}
           >
             <DialogHeader>
@@ -510,11 +483,8 @@ export function MailSidebar({
               </p>
             )}
             <DialogFooter>
-              <Button
-                type="submit"
-                disabled={!newTagName.trim() || createTagMutation.isPending}
-              >
-                {createTagMutation.isPending ? "Creating…" : "Create"}
+              <Button type="submit" disabled={!newTagName.trim() || createTagMutation.isPending}>
+                {createTagMutation.isPending ? 'Creating…' : 'Create'}
               </Button>
             </DialogFooter>
           </form>
@@ -526,9 +496,7 @@ export function MailSidebar({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              Delete folder “{deleteFolderTarget}”?
-            </AlertDialogTitle>
+            <AlertDialogTitle>Delete folder “{deleteFolderTarget}”?</AlertDialogTitle>
             <AlertDialogDescription>
               The folder and every mail in it are deleted on the server.
             </AlertDialogDescription>
@@ -536,10 +504,7 @@ export function MailSidebar({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() =>
-                deleteFolderTarget &&
-                deleteFolderMutation.mutate(deleteFolderTarget)
-              }
+              onClick={() => deleteFolderTarget && deleteFolderMutation.mutate(deleteFolderTarget)}
             >
               Delete
             </AlertDialogAction>
@@ -553,7 +518,9 @@ export function MailSidebar({
             onSubmit={(e) => {
               e.preventDefault();
               const name = newFolderName.trim();
-              if (name) createFolderMutation.mutate(name);
+              if (name) {
+                createFolderMutation.mutate(name);
+              }
             }}
           >
             <DialogHeader>
@@ -574,11 +541,9 @@ export function MailSidebar({
             <DialogFooter>
               <Button
                 type="submit"
-                disabled={
-                  !newFolderName.trim() || createFolderMutation.isPending
-                }
+                disabled={!newFolderName.trim() || createFolderMutation.isPending}
               >
-                {createFolderMutation.isPending ? "Creating…" : "Create"}
+                {createFolderMutation.isPending ? 'Creating…' : 'Create'}
               </Button>
             </DialogFooter>
           </form>

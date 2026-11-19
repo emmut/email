@@ -22,6 +22,8 @@ jobs:
       - name: Validate GitHub Actions workflows
         uses: docker://rhysd/actionlint:1.7.12
       - uses: ./.github/actions/setup-build
+      - name: Check frontend formatting
+        run: pnpm format:check
       - name: Frontend tests
         run: pnpm test
       - name: Typecheck and build frontend

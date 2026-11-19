@@ -1,39 +1,39 @@
-import DOMPurify from "dompurify";
-import { invoke } from "@tauri-apps/api/core";
-import { queryOptions } from "@tanstack/react-query";
-import { cacheGet, cachePut } from "@/lib/cache";
-import { runIcloudRules } from "@/lib/rules-engine";
-import { compareNames } from "@/lib/utils";
-import type { Mail } from "@/components/mail/data";
-import type { Contact, MailBody } from "@/lib/gmail";
+import { sanitizeEmailHtml } from '@/lib/email-html';
+import { invoke } from '@tauri-apps/api/core';
+import { queryOptions } from '@tanstack/react-query';
+import { cacheGet, cachePut } from '@/lib/cache';
+import { runIcloudRules } from '@/lib/rules-engine';
+import { compareNames } from '@/lib/utils';
+import type { Mail } from '@/components/mail/data';
+import type { Contact, MailBody } from '@/lib/gmail';
 
 // App folder ids (sidebar) → iCloud IMAP mailbox names.
 export const ICLOUD_FOLDER_NAMES: Record<string, string> = {
-  inbox: "INBOX",
-  drafts: "Drafts",
-  sent: "Sent Messages",
-  junk: "Junk",
-  trash: "Deleted Messages",
-  archive: "Archive",
+  inbox: 'INBOX',
+  drafts: 'Drafts',
+  sent: 'Sent Messages',
+  junk: 'Junk',
+  trash: 'Deleted Messages',
+  archive: 'Archive',
 };
 
 // Custom (user-created) mailboxes get sidebar folder ids of the form
 // "icloud-mbx:<mailbox name>", analogous to Gmail's tag folder ids.
-const CUSTOM_FOLDER_PREFIX = "icloud-mbx:";
+const CUSTOM_FOLDER_PREFIX = 'icloud-mbx:';
 
 export function icloudCustomFolderId(mailbox: string): string {
   return `${CUSTOM_FOLDER_PREFIX}${mailbox}`;
 }
 
 export function icloudMailboxFromFolder(folder: string): string | null {
-  return folder.startsWith(CUSTOM_FOLDER_PREFIX)
-    ? folder.slice(CUSTOM_FOLDER_PREFIX.length)
-    : null;
+  return folder.startsWith(CUSTOM_FOLDER_PREFIX) ? folder.slice(CUSTOM_FOLDER_PREFIX.length) : null;
 }
 
 export function icloudFolderName(folder: string): string {
   const custom = icloudMailboxFromFolder(folder);
-  if (custom) return custom;
+  if (custom) {
+    return custom;
+  }
   return ICLOUD_FOLDER_NAMES[folder] ?? ICLOUD_FOLDER_NAMES.inbox;
 }
 
@@ -42,15 +42,19 @@ export function icloudMailId(folder: string, uid: number): string {
   return `icloud:${folder}:${uid}`;
 }
 
-export function parseIcloudMailId(
-  id: string,
-): { folder: string; uid: number } | null {
-  if (!id.startsWith("icloud:")) return null;
-  const rest = id.slice("icloud:".length);
-  const sep = rest.lastIndexOf(":");
-  if (sep === -1) return null;
+export function parseIcloudMailId(id: string): { folder: string; uid: number } | null {
+  if (!id.startsWith('icloud:')) {
+    return null;
+  }
+  const rest = id.slice('icloud:'.length);
+  const sep = rest.lastIndexOf(':');
+  if (sep === -1) {
+    return null;
+  }
   const uid = Number(rest.slice(sep + 1));
-  if (!Number.isFinite(uid)) return null;
+  if (!Number.isFinite(uid)) {
+    return null;
+  }
   return { folder: rest.slice(0, sep), uid };
 }
 
@@ -91,11 +95,11 @@ export interface IcloudMessageDetail {
 // fails but the cache has content, the cached list is shown (offline mode).
 export function icloudMessagesQuery(accountId: string, folder: string, limit?: number) {
   return queryOptions({
-    queryKey: ["icloud", accountId, "messages", folder, limit],
+    queryKey: ['icloud', accountId, 'messages', folder, limit],
     queryFn: async (): Promise<IcloudMessageSummary[]> => {
       let syncError: unknown = null;
       try {
-        await invoke("cache_sync_icloud", {
+        await invoke('cache_sync_icloud', {
           account_id: accountId,
           folder,
           limit: limit ?? 50,
@@ -108,10 +112,11 @@ export function icloudMessagesQuery(accountId: string, folder: string, limit?: n
       if (syncError === null && folder === ICLOUD_FOLDER_NAMES.inbox) {
         await runIcloudRules(accountId).catch(() => {});
       }
-      const messages = await invoke<IcloudMessageSummary[]>(
-        "icloud_cached_messages",
-        { account_id: accountId, folder, limit: limit ?? 50 },
-      );
+      const messages = await invoke<IcloudMessageSummary[]>('icloud_cached_messages', {
+        account_id: accountId,
+        folder,
+        limit: limit ?? 50,
+      });
       if (syncError !== null && messages.length === 0) {
         throw syncError instanceof Error ? syncError : new Error(String(syncError));
       }
@@ -129,9 +134,9 @@ export function icloudMessagesQuery(accountId: string, folder: string, limit?: n
 // "messages" prefix so optimistic read/remove updates apply to results too.
 export function icloudSearchQuery(accountId: string, folder: string, query: string) {
   return queryOptions({
-    queryKey: ["icloud", accountId, "messages", folder, "search", query],
+    queryKey: ['icloud', accountId, 'messages', folder, 'search', query],
     queryFn: () =>
-      invoke<IcloudMessageSummary[]>("icloud_search_messages", {
+      invoke<IcloudMessageSummary[]>('icloud_search_messages', {
         account_id: accountId,
         folder,
         query,
@@ -146,9 +151,9 @@ export function icloudSearchQuery(accountId: string, folder: string, query: stri
 // syncing query above is still in flight.
 export function icloudLocalMessagesQuery(accountId: string, folder: string, limit?: number) {
   return queryOptions({
-    queryKey: ["icloud", accountId, "messages", folder, limit, "local"],
+    queryKey: ['icloud', accountId, 'messages', folder, limit, 'local'],
     queryFn: () =>
-      invoke<IcloudMessageSummary[]>("icloud_cached_messages", {
+      invoke<IcloudMessageSummary[]>('icloud_cached_messages', {
         account_id: accountId,
         folder,
         limit: limit ?? 50,
@@ -160,9 +165,9 @@ export function icloudLocalMessagesQuery(accountId: string, folder: string, limi
 
 export function icloudMessageBodyQuery(accountId: string, folder: string, uid: number) {
   return queryOptions({
-    queryKey: ["icloud", accountId, "message", folder, uid],
+    queryKey: ['icloud', accountId, 'message', folder, uid],
     queryFn: async (): Promise<MailBody> => {
-      const detail = await invoke<IcloudMessageDetail>("icloud_fetch_message", {
+      const detail = await invoke<IcloudMessageDetail>('icloud_fetch_message', {
         account_id: accountId,
         folder,
         uid,
@@ -170,12 +175,7 @@ export function icloudMessageBodyQuery(accountId: string, folder: string, uid: n
       const from = detail.from_name
         ? `${detail.from_name} <${detail.from_email}>`
         : detail.from_email;
-      const html = detail.body_html
-        ? DOMPurify.sanitize(detail.body_html, {
-            USE_PROFILES: { html: true },
-            FORBID_TAGS: ["form", "input", "button", "select", "textarea"],
-          })
-        : null;
+      const html = detail.body_html ? sanitizeEmailHtml(detail.body_html) : null;
       return {
         html,
         text: detail.body_text,
@@ -184,10 +184,10 @@ export function icloudMessageBodyQuery(accountId: string, folder: string, uid: n
         from,
         replyTo: from,
         to: detail.to,
-        cc: detail.cc ?? "",
+        cc: detail.cc ?? '',
         messageId: detail.message_id,
-        references: detail.references ?? "",
-        date: detail.date ?? "",
+        references: detail.references ?? '',
+        date: detail.date ?? '',
       };
     },
     enabled: !!accountId && !!folder && uid > 0,
@@ -200,21 +200,21 @@ export function icloudMessageBodyQuery(accountId: string, folder: string, uid: n
 export function icloudFoldersQuery(accountId: string) {
   const standard = new Set(Object.values(ICLOUD_FOLDER_NAMES));
   return queryOptions({
-    queryKey: ["icloud", accountId, "folders"],
+    queryKey: ['icloud', accountId, 'folders'],
     queryFn: async (): Promise<string[]> => {
       try {
-        const all = await invoke<string[]>("icloud_list_folders", {
+        const all = await invoke<string[]>('icloud_list_folders', {
           account_id: accountId,
         });
-        const custom = all
-          .filter((name) => !standard.has(name))
-          .sort(compareNames);
+        const custom = all.filter((name) => !standard.has(name)).sort(compareNames);
         cachePut(`icloud:folders:${accountId}`, custom);
         return custom;
       } catch (err) {
         // Offline — fall back to the last known folder list.
         const cached = await cacheGet<string[]>(`icloud:folders:${accountId}`);
-        if (cached) return cached;
+        if (cached) {
+          return cached;
+        }
         throw err;
       }
     },
@@ -224,31 +224,30 @@ export function icloudFoldersQuery(accountId: string) {
 }
 
 export function icloudCreateFolder(accountId: string, name: string) {
-  return invoke<void>("icloud_create_folder", { account_id: accountId, name });
+  return invoke<void>('icloud_create_folder', { account_id: accountId, name });
 }
 
 export function icloudDeleteFolder(accountId: string, name: string) {
-  return invoke<void>("icloud_delete_folder", { account_id: accountId, name });
+  return invoke<void>('icloud_delete_folder', { account_id: accountId, name });
 }
 
 // Sidebar badge counts keyed by app folder id (inbox/junk unread, drafts total).
 export function icloudFolderCountsQuery(accountId: string) {
   return queryOptions({
-    queryKey: ["icloud", accountId, "counts"],
+    queryKey: ['icloud', accountId, 'counts'],
     queryFn: async (): Promise<Record<string, number>> => {
       try {
-        const counts = await invoke<Record<string, number>>(
-          "icloud_folder_counts",
-          { account_id: accountId },
-        );
+        const counts = await invoke<Record<string, number>>('icloud_folder_counts', {
+          account_id: accountId,
+        });
         cachePut(`icloud:counts:${accountId}`, counts);
         return counts;
       } catch (err) {
         // Offline — fall back to the last known counts.
-        const cached = await cacheGet<Record<string, number>>(
-          `icloud:counts:${accountId}`,
-        );
-        if (cached) return cached;
+        const cached = await cacheGet<Record<string, number>>(`icloud:counts:${accountId}`);
+        if (cached) {
+          return cached;
+        }
         throw err;
       }
     },
@@ -272,7 +271,7 @@ export function icloudSendMessage(params: {
   inReplyTo?: string;
   references?: string;
 }) {
-  return invoke<void>("icloud_send_message", {
+  return invoke<void>('icloud_send_message', {
     account_id: params.accountId,
     from_email: params.fromEmail,
     to: params.to,
@@ -290,7 +289,7 @@ export function icloudSendMessage(params: {
 // `mime` is the complete RFC 822 message, built by the shared frontend
 // builder so Gmail and iCloud drafts have identical content.
 export function icloudSaveDraft(accountId: string, mime: string) {
-  return invoke<void>("icloud_append_message", {
+  return invoke<void>('icloud_append_message', {
     account_id: accountId,
     folder: ICLOUD_FOLDER_NAMES.drafts,
     content: mime,
@@ -299,7 +298,7 @@ export function icloudSaveDraft(accountId: string, mime: string) {
 }
 
 export function icloudMarkRead(accountId: string, folder: string, uid: number, read: boolean) {
-  return invoke<void>("icloud_mark_read", { account_id: accountId, folder, uid, read });
+  return invoke<void>('icloud_mark_read', { account_id: accountId, folder, uid, read });
 }
 
 export function icloudMoveMessage(
@@ -308,7 +307,7 @@ export function icloudMoveMessage(
   uid: number,
   targetFolder: string,
 ) {
-  return invoke<void>("icloud_move_message", {
+  return invoke<void>('icloud_move_message', {
     account_id: accountId,
     folder,
     uid,
@@ -318,13 +317,8 @@ export function icloudMoveMessage(
 
 // Junk verdict: stores Apple Mail's $Junk/$NotJunk keywords and moves the
 // message to Junk (or back to Inbox) in one IMAP round trip.
-export function icloudMarkJunk(
-  accountId: string,
-  folder: string,
-  uid: number,
-  junk: boolean,
-) {
-  return invoke<void>("icloud_mark_junk", {
+export function icloudMarkJunk(accountId: string, folder: string, uid: number, junk: boolean) {
+  return invoke<void>('icloud_mark_junk', {
     account_id: accountId,
     folder,
     uid,
@@ -334,12 +328,8 @@ export function icloudMarkJunk(
 }
 
 // Permanent removal (\Deleted + EXPUNGE) — used from the Trash folder.
-export function icloudDeleteMessage(
-  accountId: string,
-  folder: string,
-  uid: number,
-) {
-  return invoke<void>("icloud_delete_message", {
+export function icloudDeleteMessage(accountId: string, folder: string, uid: number) {
+  return invoke<void>('icloud_delete_message', {
     account_id: accountId,
     folder,
     uid,
@@ -347,7 +337,7 @@ export function icloudDeleteMessage(
 }
 
 export function icloudEmptyFolder(accountId: string, folder: string) {
-  return invoke<void>("icloud_empty_folder", {
+  return invoke<void>('icloud_empty_folder', {
     account_id: accountId,
     folder,
   });
@@ -358,9 +348,9 @@ export function icloudEmptyFolder(accountId: string, folder: string) {
 export function toMail(msg: IcloudMessageSummary): Mail {
   return {
     id: icloudMailId(msg.folder, msg.uid),
-    name: msg.from_name ?? msg.from_email.split("@")[0],
+    name: msg.from_name ?? msg.from_email.split('@')[0],
     email: msg.from_email,
-    subject: msg.subject || "(no subject)",
+    subject: msg.subject || '(no subject)',
     text: msg.snippet,
     date: msg.date ?? new Date().toISOString(),
     read: msg.read,
@@ -368,7 +358,6 @@ export function toMail(msg: IcloudMessageSummary): Mail {
     labels: [],
   };
 }
-
 
 // --- avatar ---
 
@@ -378,13 +367,13 @@ export function toMail(msg: IcloudMessageSummary): Mail {
 // Avatar back to the initials fallback.
 export function icloudAvatarQuery(email: string) {
   return queryOptions({
-    queryKey: ["icloud", "avatar", email],
+    queryKey: ['icloud', 'avatar', email],
     queryFn: async (): Promise<string> => {
       const bytes = new TextEncoder().encode(email.trim().toLowerCase());
-      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
       const hash = Array.from(new Uint8Array(digest))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
       return `https://www.gravatar.com/avatar/${hash}?s=160&d=404`;
     },
     enabled: !!email,
@@ -397,15 +386,13 @@ export function icloudAvatarQuery(email: string) {
 // IMAP has no contacts API; the local message cache (senders + recipients)
 // is the best available address book for iCloud accounts.
 export const icloudContactsQuery = queryOptions({
-  queryKey: ["icloud", "contacts"],
+  queryKey: ['icloud', 'contacts'],
   queryFn: async (): Promise<Contact[]> => {
-    const rows = await invoke<{ name: string | null; email: string }[]>(
-      "cache_contacts",
-    );
+    const rows = await invoke<{ name: string | null; email: string }[]>('cache_contacts');
     return rows.map((r) => ({
-      name: r.name ?? "",
+      name: r.name ?? '',
       email: r.email,
-      source: "icloud" as const,
+      source: 'icloud' as const,
     }));
   },
   staleTime: 5 * 60_000,

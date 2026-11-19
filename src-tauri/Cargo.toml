@@ -33,7 +33,7 @@ rand = "0.8"
 url = "2"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 imap = { version = "2", features = ["tls"], default-features = false }
 mailparse = "0.15"
 native-tls = "0.2"

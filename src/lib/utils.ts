@@ -1,48 +1,51 @@
-import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
+  return twMerge(clsx(inputs));
 }
 
-export const isMac = navigator.platform.startsWith("Mac")
+export const isMac = navigator.platform.startsWith('Mac');
 
 // Locale-aware name ordering for folders/tags, following the language the
 // user's system reports to the webview.
 export function compareNames(a: string, b: string): number {
-  return a.localeCompare(b, navigator.language, { sensitivity: "base" })
+  return a.localeCompare(b, navigator.language, { sensitivity: 'base' });
 }
 
 // After the open mail is archived/trashed, triage flows to the mail after it
 // in the list — or the one before it at the end of the list, null when the
 // list empties out.
-export function nextSelectedId(
-  ids: string[],
-  removedId: string,
-): string | null {
-  const index = ids.indexOf(removedId)
-  if (index === -1) return null
-  return ids[index + 1] ?? ids[index - 1] ?? null
+export function nextSelectedId(ids: string[], removedId: string): string | null {
+  const index = ids.indexOf(removedId);
+  if (index === -1) {
+    return null;
+  }
+  return ids[index + 1] ?? ids[index - 1] ?? null;
 }
 
 // Normalize a thrown value to a non-empty, displayable string. Mutation or
 // query rejections can be anything — non-Error values, empty strings — and a
 // blank "Action failed:" tells the user nothing.
 export function errMessage(err: unknown): string {
-  if (err == null) return "Unknown error";
-  if (err instanceof Error) return err.message.trim() || "Unknown error";
+  if (err == null) {
+    return 'Unknown error';
+  }
+  if (err instanceof Error) {
+    return err.message.trim() || 'Unknown error';
+  }
   const text = String(err).trim();
-  return text || "Unknown error";
+  return text || 'Unknown error';
 }
 
 // "emil.jansson@x" → "EJ"
 export function initialsFromEmail(email: string) {
   return email
-    .split("@")[0]
+    .split('@')[0]
     .split(/[._-]+/)
     .filter(Boolean)
     .map((part) => part[0])
-    .join("")
+    .join('')
     .slice(0, 2)
-    .toUpperCase()
+    .toUpperCase();
 }

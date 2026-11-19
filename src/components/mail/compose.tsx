@@ -1,16 +1,5 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type MutableRefObject,
-} from "react";
-import {
-  useMutation,
-  useQueries,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   AlertDialog,
@@ -21,30 +10,27 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { RichTextEditor } from "@/components/ui/rich-text-editor";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  formatRecipient,
-  RecipientInput,
-} from "@/components/mail/recipient-input";
-import { useAccount } from "@/context/AccountContext";
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
+import { Skeleton } from '@/components/ui/skeleton';
+import { formatRecipient, RecipientInput } from '@/components/mail/recipient-input';
+import { useAccount } from '@/context/account-context';
 import {
   buildRfc822,
   contactsQuery,
@@ -53,21 +39,18 @@ import {
   tagsQuery,
   type Contact,
   type OutgoingMail,
-} from "@/lib/gmail";
-import { ACCOUNT_SIGNATURE, NO_SIGNATURE, resolveSignature, useSignature, useSignatureLibrary } from "@/lib/signature";
-import { SignatureSelect } from "@/components/ui/signature-select";
-import { signatureBlock } from "@/lib/signature-html";
+} from '@/lib/gmail';
 import {
-  icloudContactsQuery,
-  icloudSaveDraft,
-  icloudSendMessage,
-} from "@/lib/icloud";
-import {
-  isNetworkError,
-  queueGmailSend,
-  queueIcloudSend,
-  useOnline,
-} from "@/lib/offline";
+  ACCOUNT_SIGNATURE,
+  NO_SIGNATURE,
+  resolveSignature,
+  useSignature,
+  useSignatureLibrary,
+} from '@/lib/signature';
+import { SignatureSelect } from '@/components/ui/signature-select';
+import { signatureBlock } from '@/lib/signature-html';
+import { icloudContactsQuery, icloudSaveDraft, icloudSendMessage } from '@/lib/icloud';
+import { isNetworkError, queueGmailSend, queueIcloudSend, useOnline } from '@/lib/offline';
 
 export interface ComposeDraft {
   to?: string;
@@ -81,16 +64,14 @@ export interface ComposeDraft {
 }
 
 export function htmlToPlain(html: string): string {
-  return (
-    new DOMParser().parseFromString(html, "text/html").body.textContent ?? ""
-  );
+  return new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '';
 }
 
 // The addresses a comma-separated recipient field already holds, whether
 // written bare ("a@b") or with a display name ("Ann <a@b>").
 function fieldEmails(field: string): string[] {
   return field
-    .split(",")
+    .split(',')
     .map((part) => {
       const angled = part.match(/<([^>]*)>/);
       return (angled ? angled[1] : part).trim().toLowerCase();
@@ -108,9 +89,10 @@ export function addMentionedRecipient(
   contact: Contact,
 ): string {
   const email = contact.email.toLowerCase();
-  if ([to, cc, bcc].some((field) => fieldEmails(field).includes(email)))
+  if ([to, cc, bcc].some((field) => fieldEmails(field).includes(email))) {
     return to;
-  const base = to.replace(/[,\s]+$/, "");
+  }
+  const base = to.replace(/[,\s]+$/, '');
   const entry = `${formatRecipient(contact)}, `;
   return base ? `${base}, ${entry}` : entry;
 }
@@ -126,10 +108,10 @@ export interface HeaderFields {
 // point for unsaved-changes detection.
 export function initialHeaderFields(draft: ComposeDraft): HeaderFields {
   return {
-    to: draft.to ?? "",
-    cc: draft.cc ?? "",
-    bcc: "",
-    subject: draft.subject ?? "",
+    to: draft.to ?? '',
+    cc: draft.cc ?? '',
+    bcc: '',
+    subject: draft.subject ?? '',
   };
 }
 
@@ -140,7 +122,9 @@ export function hasUnsavedChanges(
   fields: HeaderFields,
   bodyEdited: boolean,
 ): boolean {
-  if (bodyEdited) return true;
+  if (bodyEdited) {
+    return true;
+  }
   const initial = initialHeaderFields(draft);
   return (Object.keys(initial) as (keyof HeaderFields)[]).some(
     (key) => fields[key] !== initial[key],
@@ -163,14 +147,17 @@ export function ComposeDialog({
     <Dialog
       open={draft !== null}
       onOpenChange={(open) => {
-        if (open) return;
-        if (closeGuard.current) closeGuard.current();
-        else onClose();
+        if (open) {
+          return;
+        }
+        if (closeGuard.current) {
+          closeGuard.current();
+        } else {
+          onClose();
+        }
       }}
     >
-      {draft !== null && (
-        <ComposeForm draft={draft} onClose={onClose} closeGuard={closeGuard} />
-      )}
+      {draft !== null && <ComposeForm draft={draft} onClose={onClose} closeGuard={closeGuard} />}
     </Dialog>
   );
 }
@@ -193,14 +180,14 @@ function ComposeForm({
     <DialogContent className="sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle>
-          {draft.inReplyTo
-            ? "Reply"
-            : draft.forward
-              ? "Forward"
-              : "New message"}
+          {draft.inReplyTo ? 'Reply' : draft.forward ? 'Forward' : 'New message'}
         </DialogTitle>
       </DialogHeader>
-      {error ? <p role="alert" className="text-sm text-destructive">Could not load signatures. Close this message and try again.</p> : isPending ? (
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          Could not load signatures. Close this message and try again.
+        </p>
+      ) : isPending ? (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-8 w-full" />
           <Skeleton className="h-8 w-full" />
@@ -230,9 +217,7 @@ function ComposeFields({
   closeGuard: CloseGuard;
 }) {
   const { accounts, activeAccountId } = useAccount();
-  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
-    activeAccountId,
-  );
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(activeAccountId);
   const [initialFields] = useState(() => initialHeaderFields(draft));
   const [to, setTo] = useState(initialFields.to);
   const [cc, setCc] = useState(initialFields.cc);
@@ -241,7 +226,7 @@ function ComposeFields({
   const [tagIds, setTagIds] = useState<string[]>([]);
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
-  const selectedIsIcloud = selectedAccount?.kind === "icloud";
+  const selectedIsIcloud = selectedAccount?.kind === 'icloud';
 
   // Tags and contact autocomplete are Gmail features.
   const { data: tags } = useQuery({
@@ -251,18 +236,16 @@ function ComposeFields({
 
   useEffect(() => setTagIds([]), [selectedAccountId]);
 
-  const toggleTag = (id: string) =>
-    setTagIds((prev) =>
-      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id],
-    );
+  function toggleTag(id: string) {
+    return setTagIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
+  }
 
-  const buildHtml = (sig: string) =>
-    "<p></p>" +
-    signatureBlock(sig, true) +
-    (draft.bodyHtml ?? "");
+  function buildHtml(sig: string) {
+    return '<p></p>' + signatureBlock(sig, true) + (draft.bodyHtml ?? '');
+  }
   const [body, setBody] = useState(() => ({
     html: buildHtml(signature),
-    text: "",
+    text: '',
   }));
 
   const edited = useRef(false);
@@ -270,23 +253,33 @@ function ComposeFields({
   const selectedSig = useSignature(selectedAccount, signatureOverride === ACCOUNT_SIGNATURE);
   const library = useSignatureLibrary();
   const signatures = library.data?.signatures ?? [];
-  const signatureChoice = signatureOverride === null ? selectedSig.choice :
-    (signatureOverride === ACCOUNT_SIGNATURE || signatureOverride === NO_SIGNATURE || signatures.some((item) => item.id === signatureOverride))
-      ? signatureOverride : NO_SIGNATURE;
-  const signaturePending = selectedSig.isPending ||
+  const signatureChoice =
+    signatureOverride === null
+      ? selectedSig.choice
+      : signatureOverride === ACCOUNT_SIGNATURE ||
+          signatureOverride === NO_SIGNATURE ||
+          signatures.some((item) => item.id === signatureOverride)
+        ? signatureOverride
+        : NO_SIGNATURE;
+  const signaturePending =
+    selectedSig.isPending ||
     (signatureChoice === ACCOUNT_SIGNATURE && selectedSig.accountIsPending);
-  const signatureHtml = resolveSignature(library.data ?? { signatures: [], defaults: {} }, signatureChoice, selectedSig.accountSignature);
+  const signatureHtml = resolveSignature(
+    library.data ?? { signatures: [], defaults: {} },
+    signatureChoice,
+    selectedSig.accountSignature,
+  );
 
   // Contacts from every connected source, deduped by address (a contact in
   // both keeps the named/Google entry). The list itself shows the origin.
-  const googleAccounts = accounts.filter((a) => a.kind === "google");
+  const googleAccounts = accounts.filter((a) => a.kind === 'google');
   const googleContacts = useQueries({
     queries:
       accounts.length === 0
         ? [contactsQuery()]
         : googleAccounts.map((account) => contactsQuery(account.id)),
   });
-  const hasIcloud = accounts.some((a) => a.kind === "icloud");
+  const hasIcloud = accounts.some((a) => a.kind === 'icloud');
   const icloudContacts = useQuery({
     ...icloudContactsQuery,
     enabled: hasIcloud,
@@ -301,28 +294,32 @@ function ComposeFields({
     ]) {
       const key = c.email.toLowerCase();
       const existing = byEmail.get(key);
-      if (!existing || (!existing.name && c.name)) byEmail.set(key, c);
+      if (!existing || (!existing.name && c.name)) {
+        byEmail.set(key, c);
+      }
     }
     return [...byEmail.values()];
   }, [googleContacts, icloudContacts.data]);
 
-  const buildOutgoing = (): OutgoingMail => ({
-    to,
-    cc: cc.trim() || undefined,
-    bcc: bcc.trim() || undefined,
-    subject,
-    body: body.text || htmlToPlain(body.html),
-    html: body.html,
-    threadId: draft.threadId,
-    inReplyTo: draft.inReplyTo,
-    references: draft.references,
-  });
+  function buildOutgoing(): OutgoingMail {
+    return {
+      to,
+      cc: cc.trim() || undefined,
+      bcc: bcc.trim() || undefined,
+      subject,
+      body: body.text || htmlToPlain(body.html),
+      html: body.html,
+      threadId: draft.threadId,
+      inReplyTo: draft.inReplyTo,
+      references: draft.references,
+    };
+  }
 
   const queryClient = useQueryClient();
   const sendMutation = useMutation({
     mutationFn: async (msg: OutgoingMail) => {
       const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
-      if (selectedAccount?.kind === "icloud") {
+      if (selectedAccount?.kind === 'icloud') {
         // Send via iCloud SMTP
         const params = {
           accountId: selectedAccount.id,
@@ -340,7 +337,9 @@ function ComposeFields({
           await icloudSendMessage(params);
         } catch (err) {
           // Offline: park it in the outbox; it sends when connectivity returns.
-          if (!isNetworkError(err)) throw err;
+          if (!isNetworkError(err)) {
+            throw err;
+          }
           await queueIcloudSend(params);
         }
       } else {
@@ -348,17 +347,19 @@ function ComposeFields({
         try {
           await sendMessage(msg, selectedAccountId ?? undefined);
         } catch (err) {
-          if (!isNetworkError(err)) throw err;
+          if (!isNetworkError(err)) {
+            throw err;
+          }
           await queueGmailSend(msg, selectedAccountId ?? undefined);
         }
       }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: ["gmail", selectedAccountId, "list"],
+        queryKey: ['gmail', selectedAccountId, 'list'],
       });
-      queryClient.invalidateQueries({ queryKey: ["icloud"] });
-      queryClient.invalidateQueries({ queryKey: ["ops"] });
+      queryClient.invalidateQueries({ queryKey: ['icloud'] });
+      queryClient.invalidateQueries({ queryKey: ['ops'] });
       onClose();
     },
   });
@@ -367,7 +368,7 @@ function ComposeFields({
     mutationFn: async () => {
       const account = accounts.find((a) => a.id === selectedAccountId);
       const msg = buildOutgoing();
-      if (account?.kind === "icloud") {
+      if (account?.kind === 'icloud') {
         // IMAP has no draft API beyond the mailbox itself: APPEND the built
         // message to Drafts. From/Date must be in the MIME (nothing fills
         // them in server-side like Gmail does).
@@ -378,12 +379,12 @@ function ComposeFields({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: ["gmail", selectedAccountId, "list"],
+        queryKey: ['gmail', selectedAccountId, 'list'],
       });
       queryClient.invalidateQueries({
-        queryKey: ["gmail", selectedAccountId, "counts"],
+        queryKey: ['gmail', selectedAccountId, 'counts'],
       });
-      queryClient.invalidateQueries({ queryKey: ["icloud"] });
+      queryClient.invalidateQueries({ queryKey: ['icloud'] });
       onClose();
     },
   });
@@ -394,15 +395,14 @@ function ComposeFields({
   // Closing with unsent edits (Esc, X, click outside) offers to save them.
   // A pristine form — or one whose send is already in flight — just closes.
   const [confirmSave, setConfirmSave] = useState(false);
-  const dirty = hasUnsavedChanges(
-    draft,
-    { to, cc, bcc, subject },
-    edited.current,
-  );
+  const dirty = hasUnsavedChanges(draft, { to, cc, bcc, subject }, edited.current);
   useEffect(() => {
     closeGuard.current = () => {
-      if (dirty && !sendMutation.isPending) setConfirmSave(true);
-      else onClose();
+      if (dirty && !sendMutation.isPending) {
+        setConfirmSave(true);
+      } else {
+        onClose();
+      }
     };
     return () => {
       closeGuard.current = null;
@@ -410,22 +410,24 @@ function ComposeFields({
   });
 
   const fromLabel = selectedAccount
-    ? `${selectedAccount.kind === "google" ? "Google" : "iCloud"}: ${selectedAccount.email}`
-    : "Select account";
+    ? `${selectedAccount.kind === 'google' ? 'Google' : 'iCloud'}: ${selectedAccount.email}`
+    : 'Select account';
 
   return (
     <form
       className="flex min-w-0 flex-col gap-3"
       onKeyDown={(e) => {
         // Cmd+Enter (macOS) / Ctrl+Enter (Windows, Linux) sends
-        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
           e.preventDefault();
           e.currentTarget.requestSubmit();
         }
       }}
       onSubmit={(e) => {
         e.preventDefault();
-        if (!selectedAccountId || signaturePending) return;
+        if (!selectedAccountId || signaturePending) {
+          return;
+        }
         sendMutation.mutate({
           ...buildOutgoing(),
           labelIds: tagIds.length ? tagIds : undefined,
@@ -445,14 +447,15 @@ function ComposeFields({
           {accounts.map((acc) => (
             <DropdownMenuItem
               key={acc.id}
-              onClick={() => { setSelectedAccountId(acc.id); setSignatureOverride(null); }}
-              className={
-                acc.id === selectedAccountId ? "bg-accent font-medium" : ""
-              }
+              onClick={() => {
+                setSelectedAccountId(acc.id);
+                setSignatureOverride(null);
+              }}
+              className={acc.id === selectedAccountId ? 'bg-accent font-medium' : ''}
             >
               <span className="flex items-center gap-2 w-full">
                 <span className="text-xs uppercase text-muted-foreground">
-                  {acc.kind === "google" ? "Google" : "iCloud"}
+                  {acc.kind === 'google' ? 'Google' : 'iCloud'}
                 </span>
                 <span className="truncate">{acc.email}</span>
               </span>
@@ -468,18 +471,8 @@ function ComposeFields({
         onChange={setTo}
         contacts={contacts ?? []}
       />
-      <RecipientInput
-        placeholder="Cc"
-        value={cc}
-        onChange={setCc}
-        contacts={contacts ?? []}
-      />
-      <RecipientInput
-        placeholder="Bcc"
-        value={bcc}
-        onChange={setBcc}
-        contacts={contacts ?? []}
-      />
+      <RecipientInput placeholder="Cc" value={cc} onChange={setCc} contacts={contacts ?? []} />
+      <RecipientInput placeholder="Bcc" value={bcc} onChange={setBcc} contacts={contacts ?? []} />
       {contactsFailed && (
         <p className="text-muted-foreground text-xs">
           Contact autocomplete unavailable: {contactsError?.message}
@@ -498,10 +491,17 @@ function ComposeFields({
           signatures={signatures}
           value={signatureChoice}
           disabled={library.isPending || library.isError}
-          onChange={(choice) => { edited.current = true; setSignatureOverride(choice); }}
+          onChange={(choice) => {
+            edited.current = true;
+            setSignatureOverride(choice);
+          }}
         />
       </div>
-      {(selectedSig.error || library.isError) && <p role="alert" className="text-xs text-destructive">Could not load saved signatures.</p>}
+      {(selectedSig.error || library.isError) && (
+        <p role="alert" className="text-xs text-destructive">
+          Could not load saved signatures.
+        </p>
+      )}
       <RichTextEditor
         initialHtml={body.html}
         signatureHtml={signaturePending ? undefined : signatureHtml}
@@ -512,8 +512,7 @@ function ComposeFields({
         }}
         mention={{
           contacts: contacts ?? [],
-          onMention: (contact) =>
-            setTo((prev) => addMentionedRecipient(prev, cc, bcc, contact)),
+          onMention: (contact) => setTo((prev) => addMentionedRecipient(prev, cc, bcc, contact)),
         }}
       />
       {!selectedIsIcloud && tags?.length ? (
@@ -522,7 +521,7 @@ function ComposeFields({
           {tags.map((tag) => (
             <Badge
               key={tag.id}
-              variant={tagIds.includes(tag.id) ? "default" : "outline"}
+              variant={tagIds.includes(tag.id) ? 'default' : 'outline'}
               render={
                 <button type="button" onClick={() => toggleTag(tag.id)}>
                   {tag.name}
@@ -543,8 +542,7 @@ function ComposeFields({
           </span>
         ) : !online ? (
           <span className="text-muted-foreground mr-auto text-xs">
-            You’re offline — the message will be queued and sent when the
-            connection returns.
+            You’re offline — the message will be queued and sent when the connection returns.
           </span>
         ) : null}
         <Button
@@ -553,10 +551,10 @@ function ComposeFields({
           disabled={saveDraftMutation.isPending || sendMutation.isPending || signaturePending}
           onClick={() => saveDraftMutation.mutate()}
         >
-          {saveDraftMutation.isPending ? "Saving…" : "Save draft"}
+          {saveDraftMutation.isPending ? 'Saving…' : 'Save draft'}
         </Button>
         <Button type="submit" disabled={sendMutation.isPending || signaturePending}>
-          {sendMutation.isPending ? "Sending…" : online ? "Send" : "Queue"}
+          {sendMutation.isPending ? 'Sending…' : online ? 'Send' : 'Queue'}
         </Button>
       </DialogFooter>
       <AlertDialog open={confirmSave} onOpenChange={setConfirmSave}>

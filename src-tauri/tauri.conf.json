@@ -24,7 +24,7 @@
     "security": {
       "csp": {
         "default-src": "'self'",
-        "script-src": "'self' 'sha256-yR/xwaRUKfoLGTB43bTLAPHgESOqNe7bSi1UCMcrGso='",
+        "script-src": "'self' 'sha256-3T2tXkZL3vsENcgO13ylPHaM3fuYPjrTsGSAUD6YV2E='",
         "style-src": "'self' 'unsafe-inline'",
         "img-src": "'self' data: https: asset: http://asset.localhost",
         "font-src": "'self' data:",

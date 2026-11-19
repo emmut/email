@@ -1,12 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
-import {
-  queryOptions,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { invoke } from '@tauri-apps/api/core';
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { DEFAULT_KEYS, type ShortcutAction } from "@/lib/shortcuts";
+import { DEFAULT_KEYS, type ShortcutAction } from '@/lib/shortcuts';
 
 // App-wide settings, persisted in the durable settings table in accounts.db
 // (the cache DB gets dropped on schema bumps, so it's no home for
@@ -33,7 +28,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   shortcuts: {},
 };
 
-const SETTINGS_KEY = "settings:v1";
+const SETTINGS_KEY = 'settings:v1';
 
 export function withDefaults(stored: Partial<AppSettings> | null): AppSettings {
   return { ...DEFAULT_SETTINGS, ...stored };
@@ -48,7 +43,7 @@ export function effectiveKeys(
 
 export async function loadSettings(): Promise<AppSettings> {
   try {
-    const json = await invoke<string | null>("settings_get", {
+    const json = await invoke<string | null>('settings_get', {
       key: SETTINGS_KEY,
     });
     return withDefaults(json ? JSON.parse(json) : null);
@@ -60,23 +55,21 @@ export async function loadSettings(): Promise<AppSettings> {
 // Unlike loads, save failures must surface — silently losing a saved
 // preference would look like a bug.
 export function saveSettings(settings: AppSettings): Promise<void> {
-  return invoke("settings_set", {
+  return invoke('settings_set', {
     key: SETTINGS_KEY,
     json: JSON.stringify(settings),
   });
 }
 
 export const settingsQuery = queryOptions({
-  queryKey: ["settings"],
+  queryKey: ['settings'],
   queryFn: loadSettings,
   staleTime: Infinity,
 });
 
 // Poll cadence in ms, or false when the user syncs manually.
 export function syncIntervalMs(settings: AppSettings): number | false {
-  return settings.syncIntervalMinutes > 0
-    ? settings.syncIntervalMinutes * 60_000
-    : false;
+  return settings.syncIntervalMinutes > 0 ? settings.syncIntervalMinutes * 60_000 : false;
 }
 
 // The effective shortcut bindings — what handlers bind and labels render.

@@ -6,9 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use base64::Engine as _;
 use chrono::{DateTime, Utc};
-use rand::RngCore;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -141,7 +139,9 @@ fn keychain_entry(account_id: &str) -> Result<keyring::Entry, String> {
 }
 
 fn store_secret(account_id: &str, secret: &str) -> Result<(), String> {
-    keychain_entry(account_id)?.set_password(secret).map_err(|e| e.to_string())
+    keychain_entry(account_id)?
+        .set_password(secret)
+        .map_err(|e| e.to_string())
 }
 
 fn load_secret(account_id: &str) -> Result<Option<String>, String> {
@@ -171,7 +171,7 @@ pub struct AccountState {
 impl AccountState {
     pub fn new(app: &AppHandle) -> Result<Self, String> {
         let conn = get_conn(app)?;
-        scrub_secrets(&conn);
+        scrub_secrets(&conn)?;
         Ok(Self {
             db: Arc::new(tokio::sync::Mutex::new(conn)),
             tokens: tokio::sync::Mutex::new(std::collections::HashMap::new()),
@@ -183,14 +183,14 @@ impl AccountState {
 /// Google tokens inside the accounts table's config JSON. Move them to the
 /// keychain (if not already there) and blank them in the DB — the keychain is
 /// the only durable secret store.
-fn scrub_secrets(conn: &Connection) {
+fn scrub_secrets(conn: &Connection) -> Result<(), String> {
     let rows: Vec<(String, String)> = conn
         .prepare("SELECT id, config FROM accounts")
         .and_then(|mut stmt| {
             stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .collect()
         })
-        .unwrap_or_default();
+        .map_err(|e| e.to_string())?;
 
     for (id, config_json) in rows {
         let Ok(mut config) = serde_json::from_str::<AccountConfig>(&config_json) else {
@@ -200,9 +200,7 @@ fn scrub_secrets(conn: &Connection) {
             AccountConfig::Google(g) => {
                 let mut dirty = false;
                 if !g.refresh_token.is_empty() {
-                    if matches!(load_secret(&id), Ok(None)) {
-                        let _ = store_secret(&id, &g.refresh_token);
-                    }
+                    migrate_secret(&id, &g.refresh_token, load_secret, store_secret)?;
                     g.refresh_token = String::new();
                     dirty = true;
                 }
@@ -217,32 +215,38 @@ fn scrub_secrets(conn: &Connection) {
                 if c.app_password.is_empty() {
                     false
                 } else {
-                    if matches!(load_secret(&id), Ok(None)) {
-                        let _ = store_secret(&id, &c.app_password);
-                    }
+                    migrate_secret(&id, &c.app_password, load_secret, store_secret)?;
                     c.app_password = String::new();
                     true
                 }
             }
         };
         if dirty {
-            if let Ok(json) = serde_json::to_string(&config) {
-                let _ = conn.execute(
-                    "UPDATE accounts SET config = ?1 WHERE id = ?2",
-                    params![json, id],
-                );
-            }
+            let json = serde_json::to_string(&config).map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE accounts SET config = ?1 WHERE id = ?2",
+                params![json, id],
+            )
+            .map_err(|e| e.to_string())?;
         }
     }
+    Ok(())
+}
+
+// Never erase the database's only credential until the keychain is durable.
+fn migrate_secret(
+    id: &str,
+    secret: &str,
+    load: impl FnOnce(&str) -> Result<Option<String>, String>,
+    store: impl FnOnce(&str, &str) -> Result<(), String>,
+) -> Result<(), String> {
+    if load(id)?.is_none() {
+        store(id, secret)?;
+    }
+    Ok(())
 }
 
 // --- Helpers ---
-
-fn random_token() -> String {
-    let mut buf = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut buf);
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
-}
 
 async fn get_account_config_inner(
     state: &State<'_, AccountState>,
@@ -347,14 +351,31 @@ pub async fn list_accounts(state: State<'_, AccountState>) -> Result<Vec<Account
                 display_name: row.get(3)?,
                 avatar_url: row.get(4)?,
                 created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(6)?)
-                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e)))?
+                    .map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            6,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?
                     .with_timezone(&Utc),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
-                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(e)))?
+                    .map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            7,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?
                     .with_timezone(&Utc),
-                last_synced_at: row.get::<_, Option<String>>(8)?.map(|s| {
-                    DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))
-                }).flatten(),
+                last_synced_at: row
+                    .get::<_, Option<String>>(8)?
+                    .map(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .ok()
+                            .map(|dt| dt.with_timezone(&Utc))
+                    })
+                    .flatten(),
                 is_default: row.get(9)?,
             })
         })
@@ -373,9 +394,9 @@ pub async fn add_google_account(
 ) -> Result<Account, String> {
     // Start Google OAuth flow
     let client_id = oauth::client_id()?;
-    let verifier = random_token();
+    let verifier = oauth::random_token();
     let challenge = oauth::base64url(&Sha256::digest(verifier.as_bytes()));
-    let csrf = random_token();
+    let csrf = oauth::random_token();
 
     let server = tiny_http::Server::http("127.0.0.1:0")
         .map_err(|e| format!("failed to start local redirect listener: {e}"))?;
@@ -406,9 +427,10 @@ pub async fn add_google_account(
         .open_url(auth_url.as_str(), None::<&str>)
         .map_err(|e| format!("failed to open browser: {e}"))?;
 
-    let code = tauri::async_runtime::spawn_blocking(move || wait_for_redirect(server, &csrf))
-        .await
-        .map_err(|e| e.to_string())??;
+    let code =
+        tauri::async_runtime::spawn_blocking(move || oauth::wait_for_redirect(server, &csrf))
+            .await
+            .map_err(|e| e.to_string())??;
 
     let secret = oauth::client_secret();
     let mut params = vec![
@@ -609,9 +631,11 @@ pub async fn remove_account(
 
         // If no default account remains, promote the oldest one.
         let has_default: bool = db
-            .query_row("SELECT COUNT(*) FROM accounts WHERE is_default = 1", [], |r| {
-                r.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM accounts WHERE is_default = 1",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
             .map_err(|e| e.to_string())?
             > 0;
         if !has_default {
@@ -624,17 +648,17 @@ pub async fn remove_account(
                 .optional()
                 .map_err(|e| e.to_string())?;
             if let Some(id) = new_default {
-                db.execute("UPDATE accounts SET is_default = 1 WHERE id = ?1", params![&id])
-                    .map_err(|e| e.to_string())?;
+                db.execute(
+                    "UPDATE accounts SET is_default = 1 WHERE id = ?1",
+                    params![&id],
+                )
+                .map_err(|e| e.to_string())?;
             }
         }
     }
 
     // Drop any cached mail (and per-account kv entries) for the account
-    cache.delete_account_cache(&account_id).await?;
-    cache
-        .delete_kv_prefix(&format!("icloud:counts:{account_id}"))
-        .await?;
+    cache.delete_account_data(&account_id).await?;
 
     Ok(())
 }
@@ -754,66 +778,6 @@ pub async fn get_google_access_token(
     );
 
     Ok(tokens.access_token)
-}
-
-// --- OAuth redirect handler ---
-
-fn wait_for_redirect(server: tiny_http::Server, expected_state: &str) -> Result<String, String> {
-    use std::time::{Duration, Instant};
-
-    const REDIRECT_TIMEOUT: Duration = Duration::from_secs(300);
-    let deadline = Instant::now() + REDIRECT_TIMEOUT;
-    loop {
-        let remaining = deadline
-            .checked_duration_since(Instant::now())
-            .ok_or("timed out waiting for the browser sign-in")?;
-        let request = server
-            .recv_timeout(remaining)
-            .map_err(|e| e.to_string())?
-            .ok_or("timed out waiting for the browser sign-in")?;
-
-        let url = url::Url::parse(&format!("http://127.0.0.1{}", request.url()))
-            .map_err(|e| e.to_string())?;
-        let mut code = None;
-        let mut state = None;
-        let mut error = None;
-        for (key, value) in url.query_pairs() {
-            match key.as_ref() {
-                "code" => code = Some(value.into_owned()),
-                "state" => state = Some(value.into_owned()),
-                "error" => error = Some(value.into_owned()),
-                _ => {}
-            }
-        }
-
-        if code.is_none() && error.is_none() {
-            let _ = request.respond(tiny_http::Response::empty(404));
-            continue;
-        }
-        if let Some(error) = error {
-            respond_html(request, "Sign-in failed. You can close this tab.");
-            return Err(format!("authorization failed: {error}"));
-        }
-        if state.as_deref() != Some(expected_state) {
-            respond_html(request, "Sign-in failed. You can close this tab.");
-            return Err("state mismatch in OAuth redirect".to_string());
-        }
-        respond_html(request, "Signed in. You can close this tab and return to the app.");
-        return Ok(code.unwrap());
-    }
-}
-
-fn respond_html(request: tiny_http::Request, message: &str) {
-    let html = format!(
-        "<!doctype html><meta charset=\"utf-8\"><title>Email</title>\
-         <body style=\"font-family: sans-serif; padding: 2rem\"><p>{message}</p>"
-    );
-    let response = tiny_http::Response::from_string(html).with_header(
-        "Content-Type: text/html; charset=utf-8"
-            .parse::<tiny_http::Header>()
-            .unwrap(),
-    );
-    let _ = request.respond(response);
 }
 
 // --- iCloud IMAP/SMTP commands ---
@@ -956,7 +920,18 @@ pub async fn icloud_send_message(
 ) -> Result<(), String> {
     let config = get_icloud_config(&state, &account_id).await?;
     tauri::async_runtime::spawn_blocking(move || {
-        smtp_send_blocking(&config, &from_email, &to, cc.as_deref(), bcc.as_deref(), &subject, &body_text, body_html.as_deref(), in_reply_to.as_deref(), references.as_deref())
+        smtp_send_blocking(
+            &config,
+            &from_email,
+            &to,
+            cc.as_deref(),
+            bcc.as_deref(),
+            &subject,
+            &body_text,
+            body_html.as_deref(),
+            in_reply_to.as_deref(),
+            references.as_deref(),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1114,7 +1089,10 @@ pub async fn icloud_empty_folder(
     })
     .await
     .map_err(|e| e.to_string())??;
-    let uids = cache.list_uids(&account_id, &folder).await.unwrap_or_default();
+    let uids = cache
+        .list_uids(&account_id, &folder)
+        .await
+        .unwrap_or_default();
     let _ = cache.delete_messages(&account_id, &folder, &uids).await;
     Ok(())
 }
@@ -1196,8 +1174,7 @@ async fn get_icloud_config(
         AccountConfig::Icloud(mut cfg) => {
             // The DB row stores no secret — the keychain is the only store.
             if cfg.app_password.is_empty() {
-                cfg.app_password =
-                    load_secret(account_id)?.ok_or("no app password in keychain")?;
+                cfg.app_password = load_secret(account_id)?.ok_or("no app password in keychain")?;
             }
             Ok(cfg)
         }
@@ -1301,7 +1278,10 @@ fn search_messages_blocking(
         .join(",");
 
     let fetches = session
-        .uid_fetch(&set, "(UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
+        .uid_fetch(
+            &set,
+            "(UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])",
+        )
         .map_err(|e| format!("fetch failed: {e}"))?;
 
     let mut messages: Vec<IcloudMessageSummary> = fetches
@@ -1366,7 +1346,10 @@ fn sync_messages_blocking(
             .collect::<Vec<_>>()
             .join(",");
         let fetches = session
-            .uid_fetch(&set, "(UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
+            .uid_fetch(
+                &set,
+                "(UID FLAGS ENVELOPE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])",
+            )
             .map_err(|e| format!("uid fetch failed: {e}"))?;
         new_messages = fetches
             .iter()
@@ -1450,14 +1433,26 @@ fn fetch_message_blocking(
         .ok_or_else(|| "message not found".to_string())?;
 
     let envelope = fetch.envelope();
-    let (from_name, from_email) = parse_address(envelope.and_then(|e| e.from.as_ref()).and_then(|v| v.first()));
+    let (from_name, from_email) = parse_address(
+        envelope
+            .and_then(|e| e.from.as_ref())
+            .and_then(|v| v.first()),
+    );
     let to = envelope
         .and_then(|e| e.to.as_ref())
-        .map(|v| v.iter().map(address_to_string).collect::<Vec<_>>().join(", "))
+        .map(|v| {
+            v.iter()
+                .map(address_to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
         .unwrap_or_default();
-    let cc = envelope
-        .and_then(|e| e.cc.as_ref())
-        .map(|v| v.iter().map(address_to_string).collect::<Vec<_>>().join(", "));
+    let cc = envelope.and_then(|e| e.cc.as_ref()).map(|v| {
+        v.iter()
+            .map(address_to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    });
     let subject = envelope
         .and_then(|e| e.subject)
         .map(|s| decode_envelope_string(s))
@@ -1712,10 +1707,7 @@ fn smtp_send_blocking(
             .map_err(|e| e.to_string())?
     };
 
-    let creds = Credentials::new(
-        config.email.clone(),
-        config.app_password.clone(),
-    );
+    let creds = Credentials::new(config.email.clone(), config.app_password.clone());
     // Port 465 is implicit TLS; 587 (iCloud's default) requires STARTTLS.
     let builder = if config.smtp_port == 465 {
         AsyncSmtpTransport::<Tokio1Executor>::relay(&config.smtp_server)
@@ -1768,11 +1760,19 @@ fn snippet_of(text: &str) -> String {
 fn summary_from_fetch(fetch: &imap::types::Fetch, folder: &str) -> IcloudMessageSummary {
     let uid = fetch.uid.unwrap_or(0);
     let envelope = fetch.envelope();
-    let (from_name, from_email) =
-        parse_address(envelope.and_then(|e| e.from.as_ref()).and_then(|v| v.first()));
+    let (from_name, from_email) = parse_address(
+        envelope
+            .and_then(|e| e.from.as_ref())
+            .and_then(|v| v.first()),
+    );
     let to = envelope
         .and_then(|e| e.to.as_ref())
-        .map(|v| v.iter().map(address_to_string).collect::<Vec<_>>().join(", "))
+        .map(|v| {
+            v.iter()
+                .map(address_to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
         .unwrap_or_default();
     let subject = envelope
         .and_then(|e| e.subject)
@@ -1805,8 +1805,14 @@ fn summary_from_fetch(fetch: &imap::types::Fetch, folder: &str) -> IcloudMessage
 }
 
 fn address_to_string(addr: &imap_proto::Address) -> String {
-    let mailbox = addr.mailbox.map(|b| String::from_utf8_lossy(b)).unwrap_or_default();
-    let host = addr.host.map(|b| String::from_utf8_lossy(b)).unwrap_or_default();
+    let mailbox = addr
+        .mailbox
+        .map(|b| String::from_utf8_lossy(b))
+        .unwrap_or_default();
+    let host = addr
+        .host
+        .map(|b| String::from_utf8_lossy(b))
+        .unwrap_or_default();
     format!("{mailbox}@{host}")
 }
 
@@ -1835,11 +1841,7 @@ fn parse_body(raw: &[u8]) -> (String, Option<String>) {
     (text, html)
 }
 
-fn collect_parts(
-    mail: &mailparse::ParsedMail,
-    text: &mut String,
-    html: &mut Option<String>,
-) {
+fn collect_parts(mail: &mailparse::ParsedMail, text: &mut String, html: &mut Option<String>) {
     let ctype = mail.ctype.mimetype.as_str();
     if !mail.subparts.is_empty() {
         for part in &mail.subparts {
@@ -1965,7 +1967,9 @@ pub async fn cache_sync_icloud(
         .await?;
     if let Some(max_uid) = cached.iter().map(|m| m.uid).max() {
         if max_uid > last_uid.unwrap_or(0) {
-            cache.update_sync_state(&account_id, &folder, max_uid).await?;
+            cache
+                .update_sync_state(&account_id, &folder, max_uid)
+                .await?;
         }
     }
 
@@ -2068,7 +2072,11 @@ pub async fn gmail_cache_list(
     limit: Option<u32>,
 ) -> Result<Vec<crate::db::GmailCachedMessage>, String> {
     cache
-        .gmail_list(&account_id, label_id.as_deref(), limit.unwrap_or(50) as usize)
+        .gmail_list(
+            &account_id,
+            label_id.as_deref(),
+            limit.unwrap_or(50) as usize,
+        )
         .await
 }
 
@@ -2121,18 +2129,12 @@ pub async fn ops_list(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn ops_delete(
-    cache: State<'_, crate::db::CacheDb>,
-    id: i64,
-) -> Result<(), String> {
+pub async fn ops_delete(cache: State<'_, crate::db::CacheDb>, id: i64) -> Result<(), String> {
     cache.delete_op(id).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn ops_bump(
-    cache: State<'_, crate::db::CacheDb>,
-    id: i64,
-) -> Result<(), String> {
+pub async fn ops_bump(cache: State<'_, crate::db::CacheDb>, id: i64) -> Result<(), String> {
     cache.bump_op(id).await
 }
 
@@ -2153,6 +2155,42 @@ pub async fn cache_delete_account(
 #[cfg(test)]
 mod tests {
     use super::decode_envelope_string;
+
+    #[test]
+    fn migration_preserves_credentials_on_keychain_failure() {
+        assert!(super::migrate_secret(
+            "account",
+            "secret",
+            |_| Err("locked".into()),
+            |_, _| panic!("must not write")
+        )
+        .is_err());
+        assert!(super::migrate_secret(
+            "account",
+            "secret",
+            |_| Ok(None),
+            |_, _| Err("write failed".into())
+        )
+        .is_err());
+        assert!(super::migrate_secret(
+            "account",
+            "secret",
+            |_| Ok(Some("existing".into())),
+            |_, _| panic!("must not overwrite")
+        )
+        .is_ok());
+        assert!(super::migrate_secret(
+            "account",
+            "secret",
+            |_| Ok(None),
+            |id, secret| {
+                assert_eq!(id, "account");
+                assert_eq!(secret, "secret");
+                Ok(())
+            }
+        )
+        .is_ok());
+    }
 
     #[test]
     fn decodes_encoded_words() {
