@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   Archive,
   MailOpen,
@@ -78,7 +78,7 @@ import {
   toMail,
 } from "@/lib/icloud";
 import { useAccount } from "@/context/AccountContext";
-import { errMessage, nextSelectedId } from "@/lib/utils";
+import { errMessage, isMac, nextSelectedId } from "@/lib/utils";
 import { useOfflineQueue } from "@/lib/offline";
 import { useNewMailNotifications } from "@/lib/notifications";
 
@@ -360,7 +360,14 @@ export function Mail() {
   });
 
   return (
-    <SidebarProvider>
+    <SidebarProvider
+      // Keep all three native traffic lights inside the collapsed rail.
+      style={
+        isMac
+          ? ({ "--sidebar-width-icon": "5.5rem" } as CSSProperties)
+          : undefined
+      }
+    >
       <MailSidebar activeFolder={activeFolder} onSelectFolder={selectFolder} />
       <SidebarInset className="h-screen overflow-hidden">
         <Tabs
