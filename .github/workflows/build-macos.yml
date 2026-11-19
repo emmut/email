@@ -1,0 +1,89 @@
+name: Build macos release
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      GOOGLE_OAUTH_CLIENT_ID:
+        required: false
+      GOOGLE_OAUTH_CLIENT_SECRET:
+        required: false
+      SPARKLE_ED_PRIVATE_KEY:
+        required: true
+permissions:
+  contents: write
+jobs:
+  build:
+    # Use the Intel pool while ARM-hosted runners fail during provisioning.
+    runs-on: macos-26-intel
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      MACOS_TARGET: aarch64-apple-darwin
+      MACOS_BUNDLE_DIR: src-tauri/target/aarch64-apple-darwin/release/bundle
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: ./.github/actions/setup-build
+        with:
+          release-tag: ${{ inputs.tag }}
+      - name: Install Apple Silicon build target
+        run: rustup target add "$MACOS_TARGET"
+      - name: Build signed macOS app and DMG
+        # A dmg-only build deletes the intermediate .app before verification.
+        run: pnpm tauri build --target "$MACOS_TARGET" --bundles app,dmg
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      - name: Verify macOS update bundle
+        run: |
+          lipo "$MACOS_BUNDLE_DIR/macos/Email.app/Contents/MacOS/email" -verify_arch arm64
+          bash scripts/verify-macos-update.sh "$MACOS_BUNDLE_DIR/macos/Email.app"
+          shopt -s failglob
+          dmgs=("$MACOS_BUNDLE_DIR"/dmg/*.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one macOS update DMG"
+            exit 1
+          fi
+          bash scripts/verify-macos-dmg.sh "${dmgs[0]}"
+      - name: Reject a tampered update bundle
+        run: |
+          ditto "$MACOS_BUNDLE_DIR/macos/Email.app" "$RUNNER_TEMP/Tampered.app"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleName Tampered' "$RUNNER_TEMP/Tampered.app/Contents/Info.plist"
+          if bash scripts/verify-macos-update.sh "$RUNNER_TEMP/Tampered.app"; then
+            echo "::error::The update bundle verifier accepted a modified Info.plist"
+            exit 1
+          fi
+      - name: Sign Sparkle update archive
+        run: |
+          shopt -s failglob
+          dmgs=("$MACOS_BUNDLE_DIR"/dmg/*.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one macOS update DMG"
+            exit 1
+          fi
+          VERSION="${RELEASE_TAG#v}"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/$(basename "${dmgs[0]}")"
+          bash scripts/generate-appcast.sh "${dmgs[0]}" "$VERSION" "$URL" appcast.xml
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: email-macos-latest
+          path: |
+            ${{ env.MACOS_BUNDLE_DIR }}/dmg/*.dmg
+            appcast.xml
+          if-no-files-found: error
+      - name: Attach macOS update to release
+        run: |
+          shopt -s failglob
+          files=(
+            "$MACOS_BUNDLE_DIR"/dmg/*.dmg
+            appcast.xml
+          )
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}

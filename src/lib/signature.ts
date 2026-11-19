@@ -109,7 +109,7 @@ export function useSignature(account: Account | null | undefined, includeAccount
   const data = library.data ?? { signatures: [], defaults: {} };
   const choice = defaultSignatureChoice(data, account?.id ?? "");
   const usesHosted = (!account || account.kind === "google") && local.data == null;
-  const hosted = useQuery({ ...signatureQuery, enabled: usesHosted && (includeAccountSignature || choice === ACCOUNT_SIGNATURE) });
+  const hosted = useQuery({ ...signatureQuery(account?.id), enabled: usesHosted && (!account || local.isSuccess) && (includeAccountSignature || choice === ACCOUNT_SIGNATURE) });
   const accountSignature = local.data ?? (usesHosted ? (hosted.data ?? "") : "");
   const accountIsPending = (!!account && local.isPending) || (usesHosted && hosted.isPending);
   const isPending = library.isPending || (choice === ACCOUNT_SIGNATURE && accountIsPending);

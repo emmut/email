@@ -7,7 +7,7 @@ import { SignatureSection } from "@/components/settings/signature-section";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/context/AccountContext", () => ({ useAccount: () => ({ activeAccount: { id: "a", kind: "icloud", email: "a@example.com" } }) }));
-vi.mock("@/lib/gmail", () => ({ signatureQuery: { queryKey: ["gmail", "signature"], queryFn: async () => "" } }));
+vi.mock("@/lib/gmail", () => ({ signatureQuery: () => ({ queryKey: ["gmail", "signature"], queryFn: async () => "" }) }));
 vi.mock("@/components/ui/html-editor", () => ({ HtmlEditor: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
   <textarea aria-label="Signature HTML" value={value} onChange={(event) => onChange(event.target.value)} />
 ) }));

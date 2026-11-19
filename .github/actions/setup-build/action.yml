@@ -1,0 +1,41 @@
+name: Set up build tools
+description: Shared Node, pnpm, Rust, cache, and native dependency setup.
+inputs:
+  linux-dependencies:
+    description: Install Ubuntu dependencies; disable in the Arch container.
+    default: "true"
+  release-tag:
+    description: If set, verify the checked-out app version matches this tag.
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Install Linux dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      if: runner.os == 'Linux' && inputs.linux-dependencies == 'true'
+      shell: bash
+    - uses: pnpm/action-setup@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 22
+        cache: pnpm
+    - name: Verify release version
+      run: |
+        VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+        if [ "v${VERSION}" != "$RELEASE_TAG" ]; then
+          echo "::error::tauri.conf.json version ${VERSION} does not match ${RELEASE_TAG}; merge the version PR from the Prepare release workflow"
+          exit 1
+        fi
+      if: inputs.release-tag != ''
+      shell: bash
+      env:
+        RELEASE_TAG: ${{ inputs.release-tag }}
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: swatinem/rust-cache@v2
+      with:
+        workspaces: src-tauri
+    - name: Install frontend dependencies
+      run: pnpm install --frozen-lockfile
+      shell: bash

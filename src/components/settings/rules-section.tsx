@@ -68,7 +68,10 @@ function RulesEditor({
 }) {
   const queryClient = useQueryClient();
   const { data: rules } = useQuery(rulesQuery(accountId));
-  const { data: tags } = useQuery({ ...tagsQuery, enabled: isGoogle });
+  const { data: tags } = useQuery({
+    ...tagsQuery(accountId),
+    enabled: isGoogle,
+  });
   const { data: folders } = useQuery({
     ...icloudFoldersQuery(accountId),
     enabled: !isGoogle,
@@ -114,6 +117,7 @@ function RulesEditor({
         rule.gmailFilterId = await createGmailFilter(
           gmailFilterCriteria(trimmed),
           target,
+          accountId,
         );
       }
       await persist([...(rules ?? []), rule]);
@@ -131,12 +135,13 @@ function RulesEditor({
       // filter, enable = recreate it (new id).
       if (rule.action.kind === "gmail-label") {
         if (rule.enabled && rule.gmailFilterId) {
-          await deleteGmailFilter(rule.gmailFilterId);
+          await deleteGmailFilter(rule.gmailFilterId, accountId);
           delete next.gmailFilterId;
         } else if (!rule.enabled) {
           next.gmailFilterId = await createGmailFilter(
             gmailFilterCriteria(rule.conditions),
             rule.action.labelId,
+            accountId,
           );
         }
       }
@@ -146,7 +151,8 @@ function RulesEditor({
 
   const deleteRule = useMutation({
     mutationFn: async (rule: MailRule) => {
-      if (rule.gmailFilterId) await deleteGmailFilter(rule.gmailFilterId);
+      if (rule.gmailFilterId)
+        await deleteGmailFilter(rule.gmailFilterId, accountId);
       await persist((rules ?? []).filter((r) => r.id !== rule.id));
     },
   });

@@ -1,0 +1,21 @@
+name: macOS update verification
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/build-macos.yml
+      - .github/workflows/macos-update-check.yml
+      - scripts/*macos*.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-26-intel
+    steps:
+      - uses: actions/checkout@v7
+      # A small signed fixture tests codesign and DMG verification; no Rust build.
+      - name: Accept sealed updates and reject modified bundles
+        run: bash scripts/test-macos-update.sh

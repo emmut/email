@@ -252,10 +252,10 @@ export function MailDisplay({
   const icloudRef = mail ? parseIcloudMailId(mail.id) : null;
   const isIcloud = icloudRef !== null;
 
-  const { data: profile } = useQuery({ ...profileQuery, enabled: !isIcloud });
+  const { data: profile } = useQuery({ ...profileQuery(activeAccount?.id), enabled: !isIcloud });
 
   const gmailBody = useQuery({
-    ...mailBodyQuery(mail?.id ?? ""),
+    ...mailBodyQuery(mail?.id ?? "", activeAccount?.id),
     enabled: mail !== null && !isIcloud,
   });
   const icloudBody = useQuery({

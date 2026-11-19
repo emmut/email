@@ -115,7 +115,11 @@ export function Mail() {
 
   const { settings } = useSettings();
   const syncMs = syncIntervalMs(settings);
-  useGmailSync(!isIcloud && syncMs !== false, syncMs || undefined);
+  useGmailSync(
+    !isIcloud && syncMs !== false,
+    syncMs || undefined,
+    activeAccount?.id,
+  );
   useOfflineQueue();
 
   useEffect(() => {
@@ -123,11 +127,15 @@ export function Mail() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const gmailList = mailListQuery(activeFolder, debouncedSearch);
+  const gmailList = mailListQuery(
+    activeFolder,
+    debouncedSearch,
+    activeAccount?.id,
+  );
   const gmailQuery = useQuery({ ...gmailList, enabled: !isIcloud });
   // Cached copy of the folder painted while the network listing loads.
   const gmailLocal = useQuery({
-    ...gmailCachedListQuery(activeFolder),
+    ...gmailCachedListQuery(activeFolder, activeAccount?.id),
     enabled: !isIcloud && !debouncedSearch,
   });
   const icloudList = icloudMessagesQuery(
@@ -207,10 +215,12 @@ export function Mail() {
     mutationFn: () =>
       isIcloud && activeAccount
         ? icloudEmptyFolder(activeAccount.id, ICLOUD_FOLDER_NAMES.trash)
-        : emptyTrash(),
+        : emptyTrash(activeAccount?.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["gmail"] });
-      queryClient.invalidateQueries({ queryKey: ["icloud"] });
+      queryClient.invalidateQueries({ queryKey: ["gmail", activeAccount?.id] });
+      queryClient.invalidateQueries({
+        queryKey: ["icloud", activeAccount?.id],
+      });
       setSelectedId(null);
       setCheckedIds(new Set());
     },
@@ -288,7 +298,10 @@ export function Mail() {
     if (action !== "read" && action !== "unread") setCheckedIds(new Set());
   };
 
-  const { data: tags } = useQuery({ ...tagsQuery, enabled: !isIcloud });
+  const { data: tags } = useQuery({
+    ...tagsQuery(activeAccount?.id),
+    enabled: !isIcloud,
+  });
   const activeTagId = tagIdFromFolder(activeFolder);
   const title = activeTagId
     ? (tags?.find((t) => t.id === activeTagId)?.name ?? "Tag")

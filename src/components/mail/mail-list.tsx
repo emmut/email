@@ -107,7 +107,10 @@ export function MailList({
   const { activeAccount } = useAccount();
   const isIcloud = activeAccount?.kind === "icloud";
   // Tags are a Gmail feature.
-  const { data: tags } = useQuery({ ...tagsQuery, enabled: !isIcloud });
+  const { data: tags } = useQuery({
+    ...tagsQuery(activeAccount?.id),
+    enabled: !isIcloud,
+  });
   // "Move to folder" targets: Inbox plus the user's custom mailboxes.
   const { data: customFolders } = useQuery({
     ...icloudFoldersQuery(activeAccount?.id ?? ""),

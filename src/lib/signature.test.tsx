@@ -11,9 +11,9 @@ import {
 } from "@/lib/signature";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@/lib/gmail", () => ({ signatureQuery: {
-  queryKey: ["gmail", "signature"], queryFn: async () => "<p>Gmail</p>", staleTime: Infinity,
-} }));
+vi.mock("@/lib/gmail", () => ({ signatureQuery: (id?: string) => ({
+  queryKey: ["gmail", id, "signature"], queryFn: async () => `<p>Gmail ${id ?? "legacy"}</p>`, staleTime: Infinity,
+}) }));
 
 const account = { id: "a", kind: "google", email: "a@example.com" } as Account;
 const work = { id: "work", name: "Work", html: '<img src="https://example.com/logo.png" width="96">' };
@@ -93,10 +93,19 @@ describe("signature persistence and legacy compatibility", () => {
   it("falls back to Gmail, but iCloud never inherits a Gmail signature", async () => {
     const { result, rerender } = renderHook(({ acc }) => useSignature(acc), { ...clientWrapper(), initialProps: { acc: account } });
     await waitFor(() => expect(result.current.isPending).toBe(false));
-    expect(result.current.signature).toBe("<p>Gmail</p>");
+    expect(result.current.signature).toBe("<p>Gmail a</p>");
     rerender({ acc: { ...account, id: "icloud", kind: "icloud" } });
     await waitFor(() => expect(result.current.isPending).toBe(false));
     expect(result.current.signature).toBe("");
+  });
+
+  it("keeps hosted signatures isolated when switching Google accounts", async () => {
+    const { result, rerender } = renderHook(({ acc }) => useSignature(acc), { ...clientWrapper(), initialProps: { acc: account } });
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+    expect(result.current.signature).toBe("<p>Gmail a</p>");
+    rerender({ acc: { ...account, id: "b", email: "b@example.com" } });
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+    expect(result.current.signature).toBe("<p>Gmail b</p>");
   });
 
   it("persists a shared signature and default across a fresh query client", async () => {

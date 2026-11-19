@@ -1,39 +1,121 @@
 name: Release
-
-# Bumps the version, commits, tags, pushes, and builds — same as running
-# scripts/release.sh locally, except the tag pushed here (with GITHUB_TOKEN)
-# can't trigger build.yml, so this workflow calls it directly instead.
 on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      GOOGLE_OAUTH_CLIENT_ID:
+        required: false
+      GOOGLE_OAUTH_CLIENT_SECRET:
+        required: false
+      SPARKLE_ED_PRIVATE_KEY:
+        required: true
+      FLATPAK_GPG_PRIVATE_KEY:
+        required: true
+  push:
+    tags:
+      - v*
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version to release, no leading v (e.g. 0.1.1)"
+      tag:
+        description: Existing release tag to retry (e.g. v0.1.5-alpha)
         required: true
-
+        type: string
 permissions:
-  contents: write
-
+  contents: read
+concurrency:
+  # Serialize latest-feed and rolling repository changes across releases.
+  group: release
+  cancel-in-progress: false
 jobs:
-  tag:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Bump version, commit, tag, push
-        env:
-          VERSION: ${{ inputs.version }}
-        run: scripts/release.sh "$VERSION"
-
-  build:
-    needs: tag
+  prepare:
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
-    uses: ./.github/workflows/build.yml
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Prepare draft release
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::invalid release tag: $RELEASE_TAG"
+            exit 1
+          fi
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          if ! gh release view "$RELEASE_TAG" &>/dev/null; then
+            gh release create "$RELEASE_TAG" --draft --verify-tag --notes "$RELEASE_NOTES"
+          else
+            # Preserve Release Please's changelog and retain the first-install
+            # instructions for this non-notarized macOS distribution.
+            NOTES=$(gh release view "$RELEASE_TAG" --json body --jq .body)
+            if [[ "$NOTES" != *"## macOS install"* ]]; then
+              printf '%s\n\n%s\n' "$NOTES" "$RELEASE_NOTES" > "$RUNNER_TEMP/release-notes.md"
+              gh release edit "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+            fi
+          fi
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_NOTES: |
+            ## macOS install
+            The app is not notarized. After copying it to Applications, clear the quarantine flag:
+            ```
+            xattr -cr /Applications/Email.app
+            ```
+  macos:
+    needs: prepare
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-macos.yml
     with:
-      version: ${{ inputs.version }}
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+  linux:
+    needs: prepare
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+  arch:
+    needs: prepare
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-arch.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+  publish:
+    # Do not move Sparkle's releases/latest redirect to a partial release.
+    needs:
+      - prepare
+      - macos
+      - linux
+      - arch
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Publish complete release
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+  flatpak-repository:
+    needs:
+      - prepare
+      - publish
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/publish-flatpak-repo.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
     secrets: inherit

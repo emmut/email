@@ -97,3 +97,37 @@ describe("AccountProvider onboarding", () => {
     expect(localStorage.getItem("activeAccountId")).toBeNull();
   });
 });
+
+describe("switching accounts", () => {
+  it("reuses fresh account caches without invalidating either provider", async () => {
+    const second = { ...googleAccount, id: "google-2", is_default: false };
+    mockInvoke.mockResolvedValue([googleAccount, second]);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const aKey = ["gmail", googleAccount.id, "list", "inbox", ""];
+    const bKey = ["gmail", second.id, "list", "inbox", ""];
+    const iKey = ["icloud", "apple", "messages", "INBOX"];
+    client.setQueryData(aKey, ["A mail"]);
+    client.setQueryData(bKey, ["B mail"]);
+    client.setQueryData(iKey, ["iCloud mail"]);
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>
+        <AccountProvider queryClient={client}>{children}</AccountProvider>
+      </QueryClientProvider>
+    );
+    const { result } = renderHook(useAccount, { wrapper });
+    await waitFor(() =>
+      expect(result.current.activeAccount?.id).toBe(googleAccount.id),
+    );
+    await act(() => result.current.switchAccount(second.id));
+    expect(result.current.activeAccount?.id).toBe(second.id);
+    await act(() => result.current.switchAccount(googleAccount.id));
+    expect(result.current.activeAccount?.id).toBe(googleAccount.id);
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(client.getQueryData(aKey)).toEqual(["A mail"]);
+    expect(client.getQueryData(bKey)).toEqual(["B mail"]);
+    expect(client.getQueryState(iKey)?.isInvalidated).toBe(false);
+  });
+});
