@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.0-alpha](https://github.com/emmut/email/compare/v0.1.7-alpha...v0.2.0-alpha) (2026-11-19)
+
+
+### Features
+
+* add a shared signature library and HTML editing ([#42](https://github.com/emmut/email/issues/42)) ([0644904](https://github.com/emmut/email/commit/0644904322f915e136d37add0dc3a509f88c3071))
+
+
+### Bug Fixes
+
+* harden mail security, upgrade dependencies, and clean up code ([#47](https://github.com/emmut/email/issues/47)) ([00618d3](https://github.com/emmut/email/commit/00618d3b28f7212f75c4b05a0f07ab4d24aca5a6))
+* improve collapsed sidebar controls and tag navigation ([#43](https://github.com/emmut/email/issues/43)) ([f478dbb](https://github.com/emmut/email/commit/f478dbbae46683c6cbeddc3c1d569fc4c4f30e70))
+* preserve quoted recipient names across compose flows ([#46](https://github.com/emmut/email/issues/46)) ([0bdc6f5](https://github.com/emmut/email/commit/0bdc6f560eeb786c11cefd425613c33d478fbb2e))
+* support recipient lists in iCloud SMTP messages ([#45](https://github.com/emmut/email/issues/45)) ([ff9aec4](https://github.com/emmut/email/commit/ff9aec44884519ba978e42e67c4d4eee83d1c7fa))
+
 ## [0.1.7-alpha](https://github.com/emmut/email/compare/v0.1.6-alpha...v0.1.7-alpha) (2026-11-18)
 
 
