@@ -243,24 +243,26 @@ function ComposeFields({
 
   const edited = useRef(false);
   const [signatureOverride, setSignatureOverride] = useState<string | null>(null);
-  const selectedSig = useSignature(selectedAccount, signatureOverride === ACCOUNT_SIGNATURE);
+  const selectedSignature = useSignature(selectedAccount, signatureOverride === ACCOUNT_SIGNATURE);
   const library = useSignatureLibrary();
   const signatures = library.data?.signatures ?? [];
-  const signatureChoice =
-    signatureOverride === null
-      ? selectedSig.choice
-      : signatureOverride === ACCOUNT_SIGNATURE ||
-          signatureOverride === NO_SIGNATURE ||
-          signatures.some((item) => item.id === signatureOverride)
-        ? signatureOverride
-        : NO_SIGNATURE;
+  let signatureChoice = selectedSignature.choice;
+  if (signatureOverride !== null) {
+    signatureChoice = signatureOverride;
+    const isBuiltInSignature =
+      signatureOverride === ACCOUNT_SIGNATURE || signatureOverride === NO_SIGNATURE;
+    const isSavedSignature = signatures.some((signature) => signature.id === signatureOverride);
+    if (!isBuiltInSignature && !isSavedSignature) {
+      signatureChoice = NO_SIGNATURE;
+    }
+  }
   const signaturePending =
-    selectedSig.isPending ||
-    (signatureChoice === ACCOUNT_SIGNATURE && selectedSig.accountIsPending);
+    selectedSignature.isPending ||
+    (signatureChoice === ACCOUNT_SIGNATURE && selectedSignature.accountIsPending);
   const signatureHtml = resolveSignature(
     library.data ?? { signatures: [], defaults: {} },
     signatureChoice,
-    selectedSig.accountSignature,
+    selectedSignature.accountSignature,
   );
 
   // Contacts from every connected source, deduped by address (a contact in
@@ -490,7 +492,7 @@ function ComposeFields({
           }}
         />
       </div>
-      {(selectedSig.error || library.isError) && (
+      {(selectedSignature.error || library.isError) && (
         <p role="alert" className="text-xs text-destructive">
           Could not load saved signatures.
         </p>
