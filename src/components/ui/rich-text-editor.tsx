@@ -1,3 +1,5 @@
+import { useEffect } from "react"
+import { updateComposeSignature } from "@/lib/compose-signature"
 import {
   EditorContent,
   useEditor,
@@ -22,6 +24,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import { EmailSignature } from "@/components/ui/email-signature"
 import { Button } from "@/components/ui/button"
 import { useMention, type MentionConfig } from "@/components/ui/mention"
 import { Separator } from "@/components/ui/separator"
@@ -154,12 +157,14 @@ function Toolbar({ editor }: { editor: Editor }) {
 
 export function RichTextEditor({
   initialHtml,
+  signatureHtml,
   onChange,
   className,
   autoFocus,
   mention,
 }: {
   initialHtml?: string
+  signatureHtml?: string
   onChange: (html: string, text: string, markdown: string) => void
   className?: string
   autoFocus?: boolean
@@ -173,6 +178,7 @@ export function RichTextEditor({
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Image.configure({ inline: true }),
       Markdown,
+      EmailSignature,
       ...(mentionExtension ? [mentionExtension] : []),
     ],
     content: initialHtml ?? "",
@@ -209,6 +215,10 @@ export function RichTextEditor({
       },
     },
   })
+
+  useEffect(() => {
+    if (editor && signatureHtml !== undefined) updateComposeSignature(editor, signatureHtml)
+  }, [editor, signatureHtml])
 
   if (!editor) return null
 
