@@ -327,8 +327,8 @@ export function Mail() {
 
   return (
     <SidebarProvider
-      // The native macOS controls span 54 px with an 8 px inset on each side.
-      style={isMac ? ({ '--sidebar-width-icon': '70px' } as CSSProperties) : undefined}
+      // The native macOS controls span 60 px with a 10 px inset on each side.
+      style={isMac ? ({ '--sidebar-width-icon': '80px' } as CSSProperties) : undefined}
     >
       <MailSidebar activeFolder={activeFolder} onSelectFolder={selectFolder} />
       <SidebarInset className="h-screen overflow-hidden">
