@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2-alpha](https://github.com/emmut/email/compare/v0.2.1-alpha...v0.2.2-alpha) (2026-11-20)
+
+
+### Bug Fixes
+
+* balance macOS window control spacing ([#50](https://github.com/emmut/email/issues/50)) ([3d70eb0](https://github.com/emmut/email/commit/3d70eb0b43bd0da79ae2bbd24774392c24f3ae9b))
+* persist sidebar state without a loading jump ([dae9f90](https://github.com/emmut/email/commit/dae9f90db6b7d38ffca1e84280bc12572089dc65))
+
 ## [0.2.1-alpha](https://github.com/emmut/email/compare/v0.2.0-alpha...v0.2.1-alpha) (2026-11-19)
 
 
