@@ -65,6 +65,7 @@ function renderSidebar({ expanded = false, tags = true } = {}) {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   account.kind = 'google';
   account.isMobile = false;
   account.isMac = false;
